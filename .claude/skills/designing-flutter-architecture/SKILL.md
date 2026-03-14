@@ -23,7 +23,7 @@ Guide for implementing Clean Architecture in Flutter applications with feature-b
 │              PRESENTATION                    │
 │  ┌─────────────┐    ┌─────────────────────┐ │
 │  │   Widgets   │ <> │    Controllers      │ │
-│  │    (UI)     │    │ (BLoC / Notifier)   │ │
+│  │    (UI)     │    │  (Riverpod)         │ │
 │  └─────────────┘    └─────────────────────┘ │
 ├─────────────────────────────────────────────┤
 │                DOMAIN                        │
@@ -62,7 +62,7 @@ Presentation → Domain ← Data
 | I need to...                  | Layer        | Example                           |
 |-------------------------------|--------------|-----------------------------------|
 | Show UI                       | Presentation | `ProductCard`, `LoginScreen`      |
-| Manage screen state           | Presentation | `LoginBloc`, `CartController`     |
+| Manage screen state           | Presentation | `LoginController`, `CartController` |
 | Define a business operation   | Domain       | `LoginUseCase`, `PlaceOrder`      |
 | Define data contracts         | Domain       | `User` entity, `AuthRepository`   |
 | Access API / database         | Data         | `AuthRepositoryImpl`, `ApiClient` |
@@ -217,12 +217,12 @@ onPressed: () async {
   }
 }
 
-// ✅ GOOD: Widget delegates to controller/bloc
+// ✅ GOOD: Widget delegates to controller
 onPressed: () => controller.login(email, password),
 ```
 
 **Rules:**
-- ✅ Widgets, pages, controllers/blocs
+- ✅ Widgets, pages, controllers
 - ✅ Navigation and routing
 - ✅ Depends on Domain only
 - ❌ No direct API/DB calls
@@ -284,7 +284,7 @@ final message = switch (failure) {
 - [ ] Repository interface defined in Domain?
 - [ ] Repository implementation in Data?
 - [ ] DTOs map to/from domain entities?
-- [ ] Controller/Bloc in Presentation only?
+- [ ] Controller in Presentation only?
 - [ ] Dependencies flow inward (Presentation → Domain ← Data)?
 - [ ] Shared code extracted to `core/` or `shared/`?
 - [ ] Feature folder is self-contained?

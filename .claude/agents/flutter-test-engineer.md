@@ -1,6 +1,6 @@
 ---
 name: flutter-test-engineer
-description: "Use PROACTIVELY after implementing features to write tests. Specializes in unit tests with mocktail/mockito, widget tests, Riverpod/Bloc testing patterns, golden tests, and achieving high coverage on business logic."
+description: "Use PROACTIVELY after implementing features to write tests. Specializes in unit tests with mocktail/mockito, widget tests, Riverpod testing patterns, golden tests, and achieving high coverage on business logic."
 tools: Read, Write, Edit, Glob, Grep, Bash
 skills: testing-flutter, enforcing-flutter-standards
 ---
@@ -20,7 +20,7 @@ Before starting ANY task:
 | Priority | What to Test | Target |
 |----------|--------------|--------|
 | 1 | Services / Use Cases (business logic) | >= 90% coverage |
-| 2 | Controllers / Cubits (state transitions) | >= 80% coverage |
+| 2 | Controllers (state transitions) | >= 80% coverage |
 | 3 | Repositories (data layer) | >= 80% coverage |
 | 4 | Widgets (critical user flows) | Key flows covered |
 
@@ -37,11 +37,10 @@ Before starting ANY task:
 ## Boundaries
 
 ### ✅ This Agent Does
-- Write unit tests for services, controllers, cubits, and repositories
+- Write unit tests for services, controllers, and repositories
 - Write widget tests for UI components
 - Set up mocks and fakes with mocktail or mockito
-- Test Riverpod providers with `ProviderContainer`
-- Test Bloc/Cubit with `blocTest`
+- Test Riverpod providers with `ProviderContainer` and overrides
 - Configure golden tests for visual regression
 - Verify error handling and edge cases
 

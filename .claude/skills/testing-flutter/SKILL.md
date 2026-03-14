@@ -1,6 +1,6 @@
 ---
 name: testing-flutter
-description: Guides Flutter testing strategy and implementation. Use when deciding what to test, writing unit/widget/integration/golden tests, mocking with mocktail, testing state management (Riverpod, BLoC), or structuring test suites. Covers Arrange-Act-Assert, coverage targets, and common pitfalls.
+description: Guides Flutter testing strategy and implementation. Use when deciding what to test, writing unit/widget/integration/golden tests, mocking with mocktail, testing Riverpod state management, or structuring test suites. Covers Arrange-Act-Assert, coverage targets, and common pitfalls.
 ---
 
 # Testing Flutter
@@ -12,7 +12,7 @@ Testing strategy, patterns, and decision guide for Flutter applications.
 - Deciding what tests to write for new code
 - Choosing between unit, widget, integration, or golden tests
 - Writing mocks with mocktail or mockito
-- Testing Riverpod providers or BLoC state
+- Testing Riverpod providers and state management
 - Debugging flaky or failing tests
 - Structuring test files and naming conventions
 
@@ -23,7 +23,7 @@ Testing strategy, patterns, and decision guide for Flutter applications.
 | Priority | What | Why | Coverage Target |
 |----------|------|-----|-----------------|
 | 1 | Business logic (Services/Use Cases) | Core value, complex rules | >=90% |
-| 2 | State management (Controllers/BLoC) | User-facing behavior | >=80% |
+| 2 | State management (Controllers) | User-facing behavior | >=80% |
 | 3 | Repositories (data access) | Data integrity | >=80% |
 | 4 | Widgets (user interactions) | UX correctness | Key flows |
 | 5 | Models (if has logic) | Data consistency | Methods only |
@@ -31,7 +31,7 @@ Testing strategy, patterns, and decision guide for Flutter applications.
 ### What NOT to Test
 
 - **Generated code** (`.g.dart`, `.freezed.dart`) - Already tested by package authors
-- **Framework code** - Flutter/Riverpod/BLoC internals work
+- **Framework code** - Flutter/Riverpod internals work
 - **Trivial getters** - No logic to verify
 - **UI styling** - Use golden tests sparingly, they're brittle
 
@@ -44,10 +44,10 @@ Business logic, calculations, rules?
   -> Unit test (fast, isolated)
 
 State changes in response to actions?
-  -> Unit test with ProviderContainer or blocTest
+  -> Unit test with ProviderContainer
 
 Widget renders correctly for different states?
-  -> Widget test with provider/BLoC overrides
+  -> Widget test with provider overrides
 
 User flow across multiple screens?
   -> Integration test (slow, use sparingly)
@@ -264,56 +264,6 @@ testWidgets('displays user name from provider', (tester) async {
 });
 ```
 
-### BLoC Testing with blocTest
-
-```dart
-import 'package:bloc_test/bloc_test.dart';
-
-void main() {
-  late ProductsBloc bloc;
-  late MockGetProducts mockGetProducts;
-
-  setUp(() {
-    mockGetProducts = MockGetProducts();
-    bloc = ProductsBloc(getProducts: mockGetProducts);
-  });
-
-  tearDown(() => bloc.close());
-
-  test('initial state is ProductsInitial', () {
-    expect(bloc.state, ProductsInitial());
-  });
-
-  blocTest<ProductsBloc, ProductsState>(
-    'emits [Loading, Loaded] when LoadProducts succeeds',
-    build: () {
-      when(() => mockGetProducts())
-          .thenAnswer((_) async => testProducts);
-      return bloc;
-    },
-    act: (bloc) => bloc.add(LoadProducts()),
-    expect: () => [
-      ProductsLoading(),
-      ProductsLoaded(testProducts),
-    ],
-  );
-
-  blocTest<ProductsBloc, ProductsState>(
-    'emits [Loading, Error] when LoadProducts fails',
-    build: () {
-      when(() => mockGetProducts())
-          .thenThrow(ServerException('Failed'));
-      return bloc;
-    },
-    act: (bloc) => bloc.add(LoadProducts()),
-    expect: () => [
-      ProductsLoading(),
-      ProductsError('Failed to load products'),
-    ],
-  );
-}
-```
-
 ## Mocking
 
 ### Mocktail (Preferred - No Code Generation)
@@ -454,7 +404,7 @@ open coverage/html/index.html
 | Component | Target | Notes |
 |-----------|--------|-------|
 | Services | >=90% | All business logic paths |
-| Controllers/BLoC | >=80% | All state transitions |
+| Controllers | >=80% | All state transitions |
 | Repositories | >=80% | CRUD + error handling |
 | Widgets | Key flows | Don't chase 100% |
 

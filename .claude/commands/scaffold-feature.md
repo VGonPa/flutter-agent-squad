@@ -28,7 +28,7 @@ lib/src/features/{feature_name}/
 ├── data/               # Repositories, data sources
 ├── application/        # Services, use cases
 └── presentation/
-    ├── controllers/    # State management (Riverpod/BLoC)
+    ├── controllers/    # State management (Riverpod)
     ├── pages/          # Full screen widgets
     └── widgets/        # Reusable UI components
 ```

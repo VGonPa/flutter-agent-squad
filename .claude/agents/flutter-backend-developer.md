@@ -28,7 +28,7 @@ Before starting ANY task:
 ## Architecture Focus
 
 ```
-UI -> Controller/Cubit -> Service -> REPOSITORY -> DATA SOURCE -> Backend
+UI -> Controller -> Service -> REPOSITORY -> DATA SOURCE -> Backend
                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
                                               YOUR FOCUS
 ```

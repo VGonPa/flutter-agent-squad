@@ -1,8 +1,8 @@
 # Flutter Agent Squad
 
-A squad of 8 specialized AI agents + 12 reusable skills + 3 commands for production-grade Flutter development. Covers architecture, UI, state management, testing, deployment, and code quality.
+A squad of 8 specialized AI agents + 11 reusable skills + 3 commands for production-grade Flutter development. Covers architecture, UI, state management, testing, deployment, and code quality.
 
-Framework-aware (Riverpod, BLoC). Opinionated on Clean Architecture.
+Framework-aware (Riverpod). Opinionated on Clean Architecture.
 
 ## When to Use This Plugin
 
@@ -12,7 +12,7 @@ Use it when working on any Flutter project. It helps with:
 - Writing widgets, controllers, repositories, and tests
 - Reviewing code for quality, performance, and security
 - Deploying to iOS App Store and Google Play
-- Choosing between Riverpod and BLoC patterns
+- Implementing state management with Riverpod
 
 ## Contents
 
@@ -25,7 +25,7 @@ Use it when working on any Flutter project. It helps with:
 | `flutter-code-reviewer` | Reviews code for architecture compliance, quality, performance, security | enforcing-flutter-standards, designing-flutter-architecture, optimizing-flutter-performance, securing-flutter-apps |
 | `flutter-debugger` | Diagnoses errors, analyzes tracebacks, implements minimal fixes | optimizing-flutter-performance, testing-flutter |
 | `flutter-deployer` | Builds, signs, and deploys apps to App Store and Google Play | deploying-flutter-ios, deploying-flutter-android, securing-flutter-apps |
-| `flutter-state-developer` | Implements state management with Riverpod or BLoC | implementing-riverpod, implementing-bloc, enforcing-flutter-standards |
+| `flutter-state-developer` | Implements state management with Riverpod | implementing-riverpod, enforcing-flutter-standards |
 | `flutter-test-engineer` | Writes unit, widget, and integration tests with high coverage | testing-flutter, enforcing-flutter-standards |
 | `flutter-ui-developer` | Creates Material Design 3 widgets, responsive layouts, animations | building-flutter-widgets, animating-flutter-ui, enforcing-flutter-standards |
 
@@ -36,7 +36,7 @@ Use it when working on any Flutter project. It helps with:
 | `designing-flutter-architecture` | Clean Architecture layers, feature-based organization, dependency rules |
 | `building-flutter-widgets` | Widget composition, Material Design 3, responsive layouts, theming, accessibility |
 | `implementing-riverpod` | Riverpod 2.x with code generation, AsyncNotifier, provider types, testing |
-| `implementing-bloc` | BLoC pattern with Dart 3 sealed classes, Cubit, event-driven architecture |
+
 | `testing-flutter` | Unit/widget/integration/golden tests, mocktail, coverage targets |
 | `optimizing-flutter-performance` | Jank diagnosis, rebuild reduction, DevTools profiling, memory leaks |
 | `securing-flutter-apps` | OWASP Mobile Top 10, secure storage, certificate pinning, input validation |
@@ -80,8 +80,6 @@ Each agent preloads relevant skills automatically. You get the knowledge without
 │                                                                          │
 │  implementing-riverpod ←───────────── flutter-state-developer            │
 │                                                                          │
-│  implementing-bloc ←───────────────── flutter-state-developer            │
-│                                                                          │
 │  testing-flutter ←────────────────┬── flutter-test-engineer              │
 │                                   └── flutter-debugger                   │
 │                                                                          │
@@ -108,7 +106,7 @@ lib/src/features/<feature>/
 ├── data/               # Repositories, data sources (Firebase, REST)
 ├── application/        # Services, use cases (business logic)
 └── presentation/
-    ├── controllers/    # State management (Riverpod AsyncNotifier / BLoC)
+    ├── controllers/    # State management (Riverpod AsyncNotifier)
     ├── pages/          # Full screen widgets
     └── widgets/        # Reusable UI components
 ```

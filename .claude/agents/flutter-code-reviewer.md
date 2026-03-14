@@ -39,7 +39,7 @@ Focus review on changed/added `.dart` files only.
 
 Verify layer boundaries are respected:
 - UI widgets do not contain business logic
-- Controllers/Cubits do not access repositories directly (go through services)
+- Controllers do not access repositories directly (go through services)
 - Repositories do not import Flutter widgets
 - Models are pure data classes without side effects
 

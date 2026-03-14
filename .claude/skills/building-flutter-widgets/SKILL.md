@@ -78,7 +78,7 @@ const StatusBadge(label: 'Active')
 | Use StatelessWidget when... | Use StatefulWidget when... |
 |-----------------------------|---------------------------|
 | UI depends only on constructor args | Widget has internal mutable state |
-| State comes from external source (BLoC/Riverpod) | AnimationController, TextEditingController |
+| State comes from external source (Riverpod) | AnimationController, TextEditingController |
 | Pure display component | Focus nodes, scroll controllers |
 | No lifecycle methods needed | initState/dispose cleanup required |
 
@@ -403,7 +403,7 @@ shared/widgets/
 | Hardcoded colors/sizes | Doesn't respect theme | Use ColorScheme, TextTheme, ThemeExtension |
 | `MediaQuery.of(context)` | Rebuilds on any change | Use `MediaQuery.sizeOf(context)` |
 | Deep widget nesting (>5 levels) | Unreadable | Extract sub-widgets |
-| Business logic in build() | Mixing concerns | Move to controller/bloc |
+| Business logic in build() | Mixing concerns | Move to controller |
 | Missing const constructors | Missed optimization | Add `const` to constructors and usage sites |
 | Text in fixed-height containers | Breaks with text scaling | Use flexible layouts |
 

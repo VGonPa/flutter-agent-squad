@@ -1,7 +1,7 @@
 {
   "name": "flutter-agent-squad",
   "version": "1.0.0",
-  "description": "A squad of 8 specialized AI agents + 12 reusable skills + 3 commands for production-grade Flutter development. Covers architecture, UI, state management, testing, deployment, and code quality. Framework-aware (Riverpod, BLoC), opinionated on Clean Architecture.",
+  "description": "A squad of 8 specialized AI agents + 11 reusable skills + 3 commands for production-grade Flutter development. Covers architecture, UI, state management, testing, deployment, and code quality. Framework-aware (Riverpod), opinionated on Clean Architecture.",
   "author": {
     "name": "VGonPa"
   },
@@ -10,7 +10,6 @@
     "flutter",
     "dart",
     "riverpod",
-    "bloc",
     "clean-architecture",
     "material-design-3",
     "testing",
