@@ -102,6 +102,17 @@ flutter build apk --release
 
 **WHY `applicationIdSuffix`:** Adding `.dev` creates `com.yourcompany.app.dev` — a completely separate app from the user's perspective. You can have dev and prod installed side by side on the same device.
 
+### Flavors vs `--dart-define`: Decision Rule
+
+| Need | Use | Why |
+|------|-----|-----|
+| Different API URLs per environment | `--dart-define` | Simpler — no Gradle changes, just compile-time constants |
+| Different app icons, names, or bundle IDs | **Flavors** | `--dart-define` can't change native resources |
+| Separate Firebase projects per environment | **Flavors** | Different `google-services.json` per flavor |
+| Only changing a few config values | `--dart-define` | Flavors are overkill for simple config |
+
+**Rule of thumb:** Start with `--dart-define`. Switch to flavors only when you need different native resources (icons, app name, Firebase config) or separate app IDs on the same device.
+
 See `REFERENCE.md` for the flavors template.
 
 ## ProGuard / R8: When and Why

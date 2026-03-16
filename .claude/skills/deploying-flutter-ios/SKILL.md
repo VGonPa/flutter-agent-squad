@@ -118,7 +118,18 @@ In Xcode → Runner target → General:
 
 ### Privacy Manifest (Required Since Spring 2024)
 
-**WHY this exists:** Apple's privacy crackdown. Every app must declare which "required reason APIs" it uses (UserDefaults, file timestamps, etc.) and why. Missing manifests cause App Store rejection.
+**WHY this exists:** Apple's privacy crackdown. Every app must declare which "required reason APIs" it uses and why. Missing manifests cause App Store rejection.
+
+**Common Flutter triggers:**
+
+| API Category | What Triggers It | Reason Code | Meaning |
+|-------------|-----------------|-------------|---------|
+| UserDefaults | SharedPreferences, most plugins | CA92.1 | App functionality |
+| File timestamp | File I/O operations | C617.1 | App functionality |
+| System boot time | Analytics packages | 35F9.1 | Measure time intervals |
+| Disk space | Storage-checking packages | E174.1 | Check before write |
+
+**HOW to determine which you need:** Build with `flutter build ios`, then check Xcode warnings for "Required Reason API" violations. Also audit your dependencies — each plugin may trigger additional API categories.
 
 See `REFERENCE.md` for the full `PrivacyInfo.xcprivacy` template.
 
@@ -200,7 +211,22 @@ Use Xcode's Product → Archive when:
 
 **WHY Fastlane Match specifically:** It stores certificates in an encrypted Git repo. Every developer and CI machine pulls the same cert. No more "works on my machine" signing issues.
 
+**CI/CD cost note:** GitHub Actions macOS runners cost 10x more than Linux runners. For solo devs or small teams, running Fastlane locally is cheaper than CI/CD. CI pays off when multiple developers need consistent releases or you want hands-off deployment on git tag push.
+
 See `REFERENCE.md` for complete Fastlane and CI/CD templates.
+
+## Common App Store Rejection Reasons
+
+| Guideline | Rejection | How to Avoid |
+|-----------|-----------|-------------|
+| 2.1 — App Completeness | Crashes, broken features, placeholder content | Test every flow on physical device; remove "Coming Soon" screens |
+| 4.3 — Spam | Too similar to existing apps (including your own) | Ensure unique value proposition; don't submit slight variants |
+| 5.1.1 — Data Collection | Missing privacy policy or inadequate data safety disclosures | Privacy policy URL required even if you collect nothing; list ALL data types |
+| 5.1.2 — Data Use | Using data for undisclosed purposes (tracking, analytics) | Privacy manifest must match actual API usage; declare all SDKs |
+| 2.5.1 — API Usage | Using private APIs | Only use public Flutter/iOS APIs; audit native plugins |
+| 4.0 — Design | Doesn't feel native, broken on newer devices | Test on latest iPhone; respect Safe Area and Dynamic Island |
+
+**WHY this matters:** Rejection adds 1-3 days per cycle (fix, rebuild, resubmit, re-review). Knowing the top reasons lets you pre-check before submitting.
 
 ## Pre-Submission Checklist
 
