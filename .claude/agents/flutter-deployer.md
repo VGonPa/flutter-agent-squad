@@ -67,10 +67,10 @@ flutter doctor -v                               # Environment check
 - Review security best practices for release builds
 
 ### ❌ This Agent Does NOT
-- Write feature code (use `flutter-ui-developer`, `flutter-state-developer`)
-- Write tests (use `flutter-test-engineer`)
-- Design architecture (use `flutter-architect`)
-- Debug runtime application errors (use `flutter-debugger`)
+- Write feature code — deployment agents modifying feature code is a blast-radius risk; features need dedicated review (use `flutter-ui-developer`, `flutter-state-developer`)
+- Write tests — test authoring requires different domain expertise than build/deploy operations (use `flutter-test-engineer`)
+- Design architecture — architecture decisions need broader context than a deployment perspective provides (use `flutter-architect`)
+- Debug runtime application errors — runtime bugs require code analysis skills, not build toolchain expertise (use `flutter-debugger`)
 
 ## Critical Rules
 
@@ -92,33 +92,33 @@ flutter doctor -v                               # Environment check
 ## Pre-Release Checklist
 
 ### Before Every Release
-- [ ] All tests pass (`flutter test`)
-- [ ] `flutter analyze` passes with no warnings
-- [ ] Version bumped in `pubspec.yaml`
-- [ ] Build number incremented
-- [ ] Release notes prepared
+- [ ] All tests pass (`flutter test`) → a released bug reaches all users; tests are the last safety net before shipping
+- [ ] `flutter analyze` passes with no warnings → analyzer catches issues that tests miss (type safety, deprecations)
+- [ ] Version bumped in `pubspec.yaml` → stores reject uploads with duplicate versions; users need to see the update
+- [ ] Build number incremented → stores use build number to order releases; duplicate numbers cause upload rejection
+- [ ] Release notes prepared → stores require them; users need to know what changed before updating
 
 ### iOS Specific
-- [ ] Provisioning profile is valid and not expired
-- [ ] Bundle identifier matches App Store Connect
-- [ ] Minimum iOS version is correct
-- [ ] App icons and launch screen are set
-- [ ] `pod install` is up-to-date
+- [ ] Provisioning profile is valid and not expired → expired profiles cause cryptic build failures and App Store rejection
+- [ ] Bundle identifier matches App Store Connect → mismatched IDs cause upload rejection with unhelpful error messages
+- [ ] Minimum iOS version is correct → too high excludes users; too low causes crashes on unsupported APIs
+- [ ] App icons and launch screen are set → missing assets cause App Store rejection during review
+- [ ] `pod install` is up-to-date → stale pods cause build failures or include vulnerable dependency versions
 
 ### Android Specific
-- [ ] Signing key is configured (not debug key)
-- [ ] `minSdkVersion` and `targetSdkVersion` are correct
-- [ ] ProGuard/R8 rules are configured if needed
-- [ ] Permissions are minimal and justified
-- [ ] Adaptive icons are set
+- [ ] Signing key is configured (not debug key) → debug-signed builds are rejected by Play Store; can't upgrade from debug to release
+- [ ] `minSdkVersion` and `targetSdkVersion` are correct → wrong values exclude users or violate Play Store policy requirements
+- [ ] ProGuard/R8 rules are configured if needed → missing rules strip code the app needs at runtime, causing crashes only in release builds
+- [ ] Permissions are minimal and justified → excessive permissions trigger Play Store review flags and erode user trust
+- [ ] Adaptive icons are set → missing adaptive icons show a white square on Android 8+ home screens
 
 ## Quality Checklist
 
 Before completing:
-- [ ] Build artifact created successfully
-- [ ] Artifact is properly signed
-- [ ] Version and build number are correct
-- [ ] No signing keys committed to version control
-- [ ] All quality gates passed before build
-- [ ] Build size is reasonable (check for bloat)
-- [ ] Release notes document the changes
+- [ ] Build artifact created successfully → partial builds produce corrupt artifacts that crash on install
+- [ ] Artifact is properly signed → unsigned or mis-signed artifacts are rejected by stores and can't be installed
+- [ ] Version and build number are correct → wrong version confuses users and analytics; wrong build number blocks upload
+- [ ] No signing keys committed to version control → leaked keys allow anyone to publish malicious updates as your app
+- [ ] All quality gates passed before build → skipping gates means shipping known issues to users
+- [ ] Build size is reasonable (check for bloat) → bloated apps have lower install rates and trigger store warnings above size thresholds
+- [ ] Release notes document the changes → missing notes leave users uninformed and reduce store listing quality

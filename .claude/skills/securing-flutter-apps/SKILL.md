@@ -1,497 +1,338 @@
 ---
 name: securing-flutter-apps
-description: Secures Flutter applications following OWASP Mobile Top 10. Use when implementing secure storage, protecting API keys, adding certificate pinning, validating input, configuring platform security (iOS Keychain, Android Keystore), or auditing app security before release.
+description: Secures Flutter applications using threat-model-driven decisions. Use when implementing secure storage, protecting API keys, adding certificate pinning, validating input, configuring platform security, or auditing app security before release. Starts with threat profile assessment to determine WHICH measures are needed vs overkill.
+user-invocable: false
 ---
 
 # Securing Flutter Apps
 
-Security best practices for Flutter applications covering storage, network, authentication, and platform security.
+Security decisions depend on your app's threat profile. A fitness tracker and a banking app need fundamentally different security postures. This skill helps you make the right decisions — not just copy security code.
 
 ## When to Use This Skill
 
+- Deciding which security measures your app actually needs
 - Storing sensitive data (tokens, credentials, user data)
 - Protecting API keys and secrets
-- Implementing certificate pinning
-- Adding biometric authentication
-- Validating and sanitizing user input
-- Configuring iOS/Android platform security
+- Evaluating whether to add certificate pinning
+- Configuring platform security (iOS/Android)
 - Pre-release security audit
 
-## Secure Storage
+## Step 1: Determine Your Threat Profile
 
-### Never Store Secrets in Plain Text
+Before implementing ANY security measure, answer: **What are you protecting, and from whom?**
+
+### Threat Profile Decision Matrix
+
+| Question | If Yes → | If No → |
+|----------|----------|---------|
+| Does the app handle payment data? | Tier 3 | Continue |
+| Does the app handle health/medical data? | Tier 3 | Continue |
+| Does the app have user accounts with PII? | Tier 2 | Continue |
+| Does the app access authenticated APIs? | Tier 2 | Continue |
+| Is it a content-only / no-login app? | Tier 1 | Tier 2 (default) |
+
+### Security Tiers
+
+| Tier | Example Apps | Required Measures |
+|------|-------------|-------------------|
+| **Tier 1: Public** | News reader, calculator, weather | HTTPS, code obfuscation, no hardcoded secrets |
+| **Tier 2: User Data** | Social app, fitness tracker, task manager | Tier 1 + secure storage, token management, input validation, platform hardening |
+| **Tier 3: Sensitive** | Banking, health records, enterprise | Tier 2 + certificate pinning, biometric gates, enhanced logging controls, screenshot prevention |
+
+**Default to Tier 2.** Most Flutter apps with user accounts land here. Tier 3 measures on a Tier 2 app add complexity without proportional security benefit.
+
+## Step 2: Secure Storage (Tier 2+)
+
+**Threat:** Malware or physical access reading stored credentials from unencrypted storage.
+
+**Rule:** `SharedPreferences` stores data in **plain text XML/plist**. Anyone with device access (or root/jailbreak) can read it.
 
 ```dart
-// NEVER: SharedPreferences is NOT secure
-await prefs.setString('password', 'user_password');
-await prefs.setString('api_token', 'secret_token');
+// NEVER: SharedPreferences is NOT encrypted
+await prefs.setString('auth_token', token); // Plain text on disk!
 
-// ALWAYS: Use flutter_secure_storage
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
+// ALWAYS: flutter_secure_storage uses Keychain (iOS) / Keystore (Android)
 final storage = FlutterSecureStorage();
-
 await storage.write(key: 'auth_token', value: token);
-final token = await storage.read(key: 'auth_token');
-await storage.delete(key: 'auth_token');
-await storage.deleteAll();
 ```
 
-### Platform-Specific Configuration
+### Platform Storage Decision
 
-```dart
-const secureStorage = FlutterSecureStorage(
-  aOptions: AndroidOptions(
-    encryptedSharedPreferences: true,
-  ),
-  iOptions: IOSOptions(
-    // first_unlock_this_device: doesn't transfer to new devices
-    // first_unlock: can migrate via backup
-    accessibility: KeychainAccessibility.first_unlock_this_device,
-  ),
-);
-```
+**iOS Keychain accessibility** — controls WHEN the OS allows reads:
 
-- **iOS**: Uses Keychain (hardware-backed on devices with Secure Enclave)
-- **Android**: Uses EncryptedSharedPreferences (Android Keystore-backed AES)
+| Option | Tradeoff | Use When |
+|--------|----------|----------|
+| `first_unlock_this_device` | More secure. Data lost on device transfer/restore. | Auth tokens (re-login is acceptable) |
+| `first_unlock` | Less secure. Migrates via backup. | User preferences that feel like "settings" |
 
-## API Key Protection
+**Android** — always enable `encryptedSharedPreferences: true` (uses Android Keystore-backed AES).
 
-### Use Compile-Time Environment Variables
+See [REFERENCE.md → Secure Storage Configuration](REFERENCE.md#secure-storage-configuration) for full setup.
+
+## Step 3: API Key Protection (All Tiers)
+
+**Threat:** API keys in source code → pushed to GitHub → scraped by bots → abused.
+
+### What Works
 
 ```bash
-# Create env.json (ADD TO .gitignore!)
-# { "API_KEY": "your_key", "API_URL": "https://api.example.com" }
-
-flutter run --dart-define-from-file=env.json
-flutter build apk --dart-define-from-file=env.json
+# Compile-time injection (keeps keys out of source)
+flutter run --dart-define-from-file=env.json  # env.json in .gitignore!
 ```
 
 ```dart
-class EnvConfig {
-  static const apiKey = String.fromEnvironment('API_KEY');
-  static const apiUrl = String.fromEnvironment(
-    'API_URL',
-    defaultValue: 'https://api.example.com',
-  );
-}
+static const apiKey = String.fromEnvironment('API_KEY');
 ```
 
-### Never Hardcode Secrets
+### ⚠️ WARNING: `--dart-define` Is NOT Truly Secret
 
-```dart
-// NEVER
-const apiKey = 'abc123secret';
+**`--dart-define` values are embedded in the compiled binary.** A motivated attacker can extract them with `strings` or reverse engineering tools. This approach protects against:
+- ✅ Keys ending up in Git history
+- ✅ Keys visible in source code reviews
 
-// NEVER commit to git
-// env.json
-// env.*.json
-// .env
-```
+It does NOT protect against:
+- ❌ Binary reverse engineering (APK/IPA decompilation)
+- ❌ Runtime extraction on rooted devices
 
-## Network Security
+**Decision:**
+- **Low-sensitivity keys** (analytics, maps, crash reporting): `--dart-define` is sufficient.
+- **High-sensitivity keys** (payment APIs, admin endpoints): **Proxy through your backend.** The client never sees the real key. This is the only truly secure approach.
 
-### HTTPS Only
+## Step 4: Network Security (Tier 2+)
 
-```dart
-// NEVER use HTTP in production
-// ALWAYS use HTTPS
+**Threat:** Man-in-the-middle (MITM) attacks intercepting API traffic.
 
-final dio = Dio(BaseOptions(
-  baseUrl: 'https://api.example.com',
-));
-```
+### HTTPS: Non-Negotiable
 
-### Certificate Pinning
+Both iOS (App Transport Security) and Android (Network Security Config, API 28+) block cleartext HTTP by default. **Don't weaken these defaults.**
 
-```dart
-import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
-import 'dart:io';
+**When you DO need to allow cleartext:** Local development only. Use platform-specific debug exceptions — never disable globally. See [REFERENCE.md → Platform Security Configuration](REFERENCE.md#platform-security-configuration).
 
-class SecureApiClient {
-  final Dio dio;
+### Certificate Pinning: A Tier 3 Decision
 
-  SecureApiClient() : dio = Dio() {
-    dio.httpClientAdapter = IOHttpClientAdapter(
-      createHttpClient: () {
-        final client = HttpClient();
-        client.badCertificateCallback = (cert, host, port) {
-          final certSha256 = sha256.convert(cert.der).toString();
-          const expectedHash = 'YOUR_CERTIFICATE_SHA256_HASH';
-          return certSha256 == expectedHash;
-        };
-        return client;
-      },
-    );
-  }
-}
-```
+**What it protects against:** Compromised Certificate Authorities, corporate MITM proxies, government-level surveillance.
 
-## Authentication Security
+**What it does NOT protect against:** Device compromise, app reverse engineering, server-side breaches.
 
-### Secure Token Management
+**⚠️ CRITICAL: Certificate Pinning Has Operational Cost**
 
-```dart
-class AuthService {
-  final FlutterSecureStorage _storage;
-  final Dio _dio;
+When you pin a certificate and that certificate **rotates** (which happens annually for most CAs), your app **stops working** until you ship an update that users install. This can brick your app for days.
 
-  AuthService(this._storage, this._dio) {
-    _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) async {
-        final token = await _storage.read(key: 'auth_token');
-        if (token != null) {
-          options.headers['Authorization'] = 'Bearer $token';
-        }
-        handler.next(options);
-      },
-      onError: (error, handler) async {
-        if (error.response?.statusCode == 401) {
-          final refreshed = await _refreshToken();
-          if (refreshed) {
-            final options = error.requestOptions;
-            final token = await _storage.read(key: 'auth_token');
-            options.headers['Authorization'] = 'Bearer $token';
-            final response = await _dio.fetch(options);
-            return handler.resolve(response);
-          }
-        }
-        handler.next(error);
-      },
-    ));
-  }
+**Decision framework:**
 
-  Future<bool> _refreshToken() async {
-    try {
-      final refreshToken = await _storage.read(key: 'refresh_token');
-      if (refreshToken == null) return false;
+| Scenario | Pin? | Why |
+|----------|------|-----|
+| Banking/health/regulated app | Yes | Regulatory requirement. Worth operational cost. |
+| App with sensitive PII, dedicated security team | Maybe | Use SPKI pinning for longer rotation windows. |
+| Consumer app, small team | No | Cert rotation risk outweighs MITM risk. HTTPS is sufficient. |
+| App with no user data | No | Nothing worth intercepting. |
 
-      final response = await _dio.post('/auth/refresh', data: {
-        'refresh_token': refreshToken,
-      });
+**If you DO pin:**
+1. Pin the **Subject Public Key Info (SPKI)**, not the leaf certificate — survives cert renewals if the key stays the same
+2. Pin **backup keys** (next rotation's key) so rotation doesn't break the app
+3. Have a **kill switch** (remote config flag to disable pinning in emergencies)
+4. Never pin ALL endpoints — leave non-critical endpoints unpinned as fallback
 
-      await _storage.write(
-        key: 'auth_token',
-        value: response.data['access_token'],
-      );
-      await _storage.write(
-        key: 'refresh_token',
-        value: response.data['refresh_token'],
-      );
-      return true;
-    } catch (e) {
-      await logout();
-      return false;
-    }
-  }
+See [REFERENCE.md → Certificate Pinning Implementation](REFERENCE.md#certificate-pinning-implementation) for code.
 
-  Future<void> logout() async {
-    await _storage.deleteAll();
-  }
-}
-```
+## Step 5: Authentication Security (Tier 2+)
 
-### Biometric Authentication
+**Threat:** Token theft, session hijacking, unauthorized access after token expiry.
 
-```dart
-import 'package:local_auth/local_auth.dart';
+### Token Management Decision
 
-class BiometricAuth {
-  final LocalAuthentication _auth = LocalAuthentication();
+**Using Firebase Auth?** Token refresh is handled automatically by the Firebase SDK. **You do NOT need custom token refresh logic.** Skip to biometrics.
 
-  Future<bool> canCheckBiometrics() async {
-    try {
-      return await _auth.canCheckBiometrics ||
-             await _auth.isDeviceSupported();
-    } catch (e) {
-      return false;
-    }
-  }
+**Using custom auth / non-Firebase backend?** You need:
+- Secure token storage (Step 2)
+- Automatic token refresh via interceptor
+- Logout on refresh failure (don't leave stale tokens)
 
-  Future<bool> authenticate({required String reason}) async {
-    try {
-      return await _auth.authenticate(
-        localizedReason: reason,
-        options: const AuthenticationOptions(
-          stickyAuth: true,
-          biometricOnly: false,
-          sensitiveTransaction: true,
-        ),
-      );
-    } catch (e) {
-      return false;
-    }
-  }
-}
-```
+See [REFERENCE.md → Token Refresh Implementation](REFERENCE.md#token-refresh-implementation) for the interceptor pattern.
 
-**Platform configuration required:**
+### Biometric Authentication (Tier 3, or Tier 2 for specific actions)
 
-```xml
-<!-- iOS: ios/Runner/Info.plist -->
-<key>NSFaceIDUsageDescription</key>
-<string>We use Face ID to securely authenticate you</string>
+**Threat:** Unauthorized access on a stolen/unlocked device.
 
-<!-- Android: android/app/src/main/AndroidManifest.xml -->
-<uses-permission android:name="android.permission.USE_BIOMETRIC"/>
-```
+**When to require biometrics:**
 
-## Data Encryption
+| Operation | Biometric Gate? | Why |
+|-----------|----------------|-----|
+| Payment / purchase | Yes | Financial consequence |
+| Viewing sensitive data (health, financial) | Yes | Privacy protection |
+| Changing security settings (password, email) | Yes | Prevent account takeover |
+| Normal app launch | **No** | UX friction without proportional security benefit |
+| Viewing non-sensitive content | **No** | Annoying, users will disable |
 
-```dart
-import 'package:encrypt/encrypt.dart';
+**Key rule:** `biometricOnly: false` — always allow PIN/passcode fallback. Not all devices have biometrics. Not all users can use biometrics (accessibility).
 
-class DataEncryption {
-  final Encrypter _encrypter;
+See [REFERENCE.md → Biometric Authentication](REFERENCE.md#biometric-authentication) for implementation.
 
-  DataEncryption._(Key key) : _encrypter = Encrypter(AES(key));
+## Step 6: Data Encryption — When You Actually Need It
 
-  static Future<DataEncryption> create() async {
-    final keyString = await KeyManager.getOrCreateKey();
-    return DataEncryption._(Key.fromBase64(keyString));
-  }
+**Threat:** Data at rest accessed by malware or physical device access.
 
-  String encrypt(String plainText) {
-    final iv = IV.fromSecureRandom(16); // Fresh IV per encryption
-    final encrypted = _encrypter.encrypt(plainText, iv: iv);
-    return '${iv.base64}:${encrypted.base64}';
-  }
+### ⚠️ Common Anti-Pattern: Double Encryption
 
-  String decrypt(String encryptedText) {
-    final parts = encryptedText.split(':');
-    final iv = IV.fromBase64(parts[0]);
-    return _encrypter.decrypt(Encrypted.fromBase64(parts[1]), iv: iv);
-  }
-}
+`flutter_secure_storage` already encrypts data using the platform's hardware-backed encryption:
+- **iOS:** Keychain (Secure Enclave on supported hardware)
+- **Android:** AES-256 via Android Keystore
 
-class KeyManager {
-  static const _storage = FlutterSecureStorage();
+**Adding AES encryption on top of `flutter_secure_storage` is security theater.** The data is already encrypted. Custom encryption adds complexity and potential bugs (key management, IV handling) with zero additional security.
 
-  static Future<String> getOrCreateKey() async {
-    var key = await _storage.read(key: 'encryption_key');
-    if (key == null) {
-      key = base64.encode(
-        List<int>.generate(32, (_) => Random.secure().nextInt(256)),
-      );
-      await _storage.write(key: 'encryption_key', value: key);
-    }
-    return key;
-  }
-}
-```
+### When You DO Need Custom Encryption
 
-## Input Validation
+| Scenario | Why Built-in Isn't Enough |
+|----------|--------------------------|
+| Encrypted SQLite/Hive database | `flutter_secure_storage` is key-value only. Database files sit on disk unencrypted. |
+| File-level encryption (exported documents, cached files) | Files in app storage aren't encrypted by default. |
+| End-to-end encrypted messaging | Encryption must happen before data leaves the device. |
+| Compliance requirement (HIPAA, PCI-DSS) specifying algorithm | Auditor needs to see specific algorithm in application code. |
 
-```dart
-class InputValidator {
-  static bool isValidEmail(String email) {
-    return RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-        .hasMatch(email);
-  }
+**If none of these apply → don't add custom encryption.** Use `flutter_secure_storage` for secrets and trust the platform.
 
-  static bool isStrongPassword(String password) {
-    if (password.length < 8) return false;
-    return password.contains(RegExp(r'[A-Z]')) &&
-           password.contains(RegExp(r'[a-z]')) &&
-           password.contains(RegExp(r'[0-9]')) &&
-           password.contains(RegExp(r'[!@#$%^&*(),.?":{}|<>]'));
-  }
+See [REFERENCE.md → Custom Encryption](REFERENCE.md#custom-encryption-when-actually-needed) for implementation when genuinely needed.
 
-  static String sanitizeHtml(String input) {
-    return input
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#x27;');
-  }
+## Step 7: Input Validation
 
-  static bool isValidUrl(String url) {
-    try {
-      final uri = Uri.parse(url);
-      return uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https');
-    } catch (e) {
-      return false;
-    }
-  }
-}
-```
+**Threat:** Injection attacks (XSS, SQL injection) and malformed data causing crashes.
 
-## Platform Security
+### The One Rule
 
-### Android
+**Client-side validation is UX. Server-side validation is security.**
 
-```xml
-<!-- android/app/src/main/AndroidManifest.xml -->
-<!-- Network security config: block cleartext -->
-<application
-  android:networkSecurityConfig="@xml/network_security_config">
-</application>
-```
+Never rely on client-side validation alone. A determined attacker bypasses your Flutter app entirely and calls your API directly. Client validation prevents user mistakes and improves UX. Server validation prevents attacks.
 
-```xml
-<!-- android/app/src/main/res/xml/network_security_config.xml -->
-<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-  <domain-config cleartextTrafficPermitted="false">
-    <domain includeSubdomains="true">yourdomain.com</domain>
-  </domain-config>
-</network-security-config>
-```
+**What to validate client-side (UX):**
+- Email format, password strength → better error messages
+- URL format → prevent navigation errors
 
-### iOS
+**What MUST be validated server-side (security):**
+- All input that touches a database query
+- All input that gets rendered as HTML/web content
+- File uploads (type, size, content)
+- Any input used in server-side operations
 
-```xml
-<!-- ios/Runner/Info.plist -->
-<!-- App Transport Security: block HTTP -->
-<key>NSAppTransportSecurity</key>
-<dict>
-  <key>NSAllowsArbitraryLoads</key>
-  <false/>
-</dict>
-```
+See [REFERENCE.md → Input Validation](REFERENCE.md#input-validation) for validator patterns.
 
-### iOS Privacy Manifests (Required since iOS 17)
+## Step 8: Platform Security Hardening (Tier 2+)
 
-```xml
-<!-- ios/Runner/PrivacyInfo.xcprivacy -->
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>NSPrivacyTracking</key>
-  <false/>
-  <key>NSPrivacyTrackingDomains</key>
-  <array/>
-  <key>NSPrivacyCollectedDataTypes</key>
-  <array/>
-  <key>NSPrivacyAccessedAPITypes</key>
-  <array>
-    <dict>
-      <key>NSPrivacyAccessedAPIType</key>
-      <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
-      <key>NSPrivacyAccessedAPITypeReasons</key>
-      <array><string>CA92.1</string></array>
-    </dict>
-  </array>
-</dict>
-</plist>
-```
+### Android: Network Security Config
 
-## Screenshot Prevention
+Block cleartext traffic explicitly. Android 9+ does this by default, but explicit config ensures it across all API levels and satisfies auditors.
 
-```kotlin
-// android/app/src/main/kotlin/.../MainActivity.kt
-import android.view.WindowManager
+### iOS: App Transport Security
 
-class MainActivity : FlutterActivity() {
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        // Prevents screenshots and screen recording on sensitive apps
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE
-        )
-    }
-}
-```
+ATS blocks HTTP by default. **Never set `NSAllowsArbitraryLoads` to `true` in production** — this disables ALL transport security.
 
-**iOS:** No direct equivalent. Use `UIScreen.capturedDidChangeNotification` to detect screen recording and blur/hide sensitive content.
+### iOS Privacy Manifests (Required since Spring 2024)
 
-## Root/Jailbreak Detection
+Apple rejects apps that use certain APIs without declaring WHY. Common Flutter triggers:
 
-```dart
-// dependencies: flutter_jailbreak_detection: ^1.10.0
-import 'package:flutter_jailbreak_detection/flutter_jailbreak_detection.dart';
+| API Category | Flutter Trigger | Required Reason Code |
+|-------------|----------------|---------------------|
+| UserDefaults | SharedPreferences, most Flutter plugins | CA92.1 (app functionality) |
+| File timestamp | Some file I/O operations | C617.1 (app functionality) |
+| System boot time | Analytics packages | 35F9.1 (measure time intervals) |
+| Disk space | Storage-checking packages | E174.1 (check storage before write) |
 
-Future<bool> isDeviceCompromised() async {
-  try {
-    return await FlutterJailbreakDetection.jailbroken;
-  } catch (e) {
-    return false; // Fail open — don't lock users out
-  }
-}
-```
+**How to determine which you need:** Run `flutter build ios`, then check Xcode warnings for "Required Reasons API" violations.
 
-**Important:** Root/jailbreak detection is bypassable — use as defense-in-depth alongside secure storage and certificate pinning, not as the sole security gate.
+See [REFERENCE.md → Platform Security Configuration](REFERENCE.md#platform-security-configuration) for config files.
 
-## Code Obfuscation
+## Step 9: Additional Hardening (Tier 3)
+
+### Screenshot Prevention
+
+**When appropriate:** Banking, health records, enterprise apps with confidential data.
+**When NOT appropriate:** Social apps, content apps, most consumer apps. Users expect to screenshot.
+
+**Android:** `FLAG_SECURE` on the window.
+**iOS:** No direct API. Detect screen recording via `UIScreen.capturedDidChangeNotification` and blur sensitive content.
+
+### Root/Jailbreak Detection
+
+**Important:** Root/jailbreak detection is **bypassable** by determined attackers. Use as defense-in-depth signal, never as the sole security gate.
+
+**Decision:** Detect and **warn** or **limit functionality**, don't hard-block. Users with legitimate rooted devices (developers, custom ROM users) will leave 1-star reviews.
+
+### Code Obfuscation
 
 ```bash
-# Build with obfuscation (always for release)
+# Always for release builds — no reason not to
 flutter build apk --obfuscate --split-debug-info=./debug-info
 flutter build ios --obfuscate --split-debug-info=./debug-info
 ```
 
-## Secure Deep Links
+**What it protects:** Makes reverse engineering harder (not impossible). Raises the bar for casual attackers.
+**What it doesn't protect:** Determined attackers with decompilation tools. Obfuscation is delay, not prevention.
+**`--split-debug-info`** is required — it removes debug symbols. Without it, obfuscation flag has minimal effect. Keep the `debug-info/` directory for crash symbolication but **never ship it**.
+
+### Secure Deep Links
+
+**Threat:** Malicious apps registering the same deep link scheme to intercept sensitive data (login tokens, reset codes).
+
+**Rule:** Use Universal Links (iOS) / App Links (Android) with HTTPS verification, not custom URL schemes. Custom schemes (`yourapp://`) can be hijacked by any app.
+
+### Logging Security
 
 ```dart
-class DeepLinkHandler {
-  static Future<void> handleDeepLink(Uri uri) async {
-    // Validate scheme
-    if (uri.scheme != 'https' && uri.scheme != 'yourapp') {
-      throw SecurityException('Invalid scheme');
-    }
-    // Validate host
-    if (uri.host != 'yourdomain.com') {
-      throw SecurityException('Invalid host');
-    }
-    // Sanitize all parameters
-    final params = uri.queryParameters.map(
-      (key, value) => MapEntry(key, InputValidator.sanitizeHtml(value)),
-    );
-    // Route with validated params only
-  }
-}
-```
-
-## Logging Security
-
-```dart
-// NEVER log sensitive data
-logger.d('User password: $password');   // NEVER!
-logger.d('API token: $token');          // NEVER!
-logger.d('Credit card: $ccNumber');     // NEVER!
+// NEVER log sensitive data — even in debug mode
+logger.d('Password: $password');   // NEVER! Logs persist in crash reports
+logger.d('Token: $token');         // NEVER! Accessible via logcat/Console
 
 // GOOD: Log actions, not data
-logger.i('User login attempt');
-logger.i('Payment processed successfully');
-
-// Remove debug logs in production
-// Use Logger with ProductionFilter or kReleaseMode checks
+logger.i('Login attempt for user ID: ${user.id}');
+logger.i('Payment processed: txn_${transaction.id}');
 ```
 
-## OWASP Mobile Top 10 Checklist
+**Production rule:** Use `Logger` with a production filter that drops debug/verbose logs. Or check `kReleaseMode` before logging.
 
-| # | Risk | Flutter Mitigation |
-|---|------|-------------------|
-| M1 | Improper Credential Usage | flutter_secure_storage, no hardcoded keys |
-| M2 | Inadequate Supply Chain | Lock dependency versions, audit packages |
-| M3 | Insecure Auth/Authorization | Token refresh, biometrics, session timeout |
-| M4 | Insufficient Input/Output Validation | InputValidator, sanitize HTML/SQL |
-| M5 | Insecure Communication | HTTPS only, certificate pinning |
-| M6 | Inadequate Privacy Controls | Privacy manifests, minimum permissions |
-| M7 | Insufficient Binary Protections | Code obfuscation, ProGuard/R8 |
-| M8 | Security Misconfiguration | Network security config, ATS |
-| M9 | Insecure Data Storage | Encrypt at rest, secure storage |
-| M10 | Insufficient Cryptography | AES-256, random IVs, secure key storage |
+## OWASP Mobile Top 10 → Skill Cross-Reference
+
+| # | Risk | Where Addressed |
+|---|------|----------------|
+| M1 | Improper Credential Usage | Step 2 (Secure Storage), Step 3 (API Keys) |
+| M2 | Inadequate Supply Chain | Lock versions in pubspec.lock, audit with `dart pub outdated` |
+| M3 | Insecure Auth/Authorization | Step 5 (Token Management, Biometrics) |
+| M4 | Insufficient Input/Output Validation | Step 7 (Input Validation) |
+| M5 | Insecure Communication | Step 4 (HTTPS, Certificate Pinning) |
+| M6 | Inadequate Privacy Controls | Step 8 (Privacy Manifests, minimum permissions) |
+| M7 | Insufficient Binary Protections | Step 9 (Obfuscation) |
+| M8 | Security Misconfiguration | Step 8 (Platform Hardening) |
+| M9 | Insecure Data Storage | Step 2 (Secure Storage), Step 6 (Encryption) |
+| M10 | Insufficient Cryptography | Step 6 (When to encrypt, anti-patterns) |
 
 ## Pre-Release Security Audit
 
-- [ ] All secrets in secure storage (not SharedPreferences)
+### Tier 1 (Every App)
+
 - [ ] No hardcoded API keys in source code
-- [ ] HTTPS only for all network requests
-- [ ] Certificate pinning for critical endpoints
-- [ ] Token refresh implemented
-- [ ] Biometric auth for sensitive operations
-- [ ] Input validation on all user inputs
+- [ ] HTTPS for all network requests
 - [ ] Code obfuscation enabled for release builds
-- [ ] Debug logs removed from production
-- [ ] Sensitive data never logged
-- [ ] Deep links validated and sanitized
-- [ ] Minimum permissions requested
+- [ ] Debug logs removed from production builds
+- [ ] `env.json` / `.env` files in `.gitignore`
+- [ ] Dependencies audited (`dart pub outdated`, check advisories)
+
+### Tier 2 (User Data Apps) — includes all Tier 1
+
+- [ ] All secrets in `flutter_secure_storage` (not SharedPreferences)
+- [ ] Token refresh implemented (or using Firebase Auth)
+- [ ] Input validation on all user-facing inputs
+- [ ] Server-side validation for all security-critical inputs
+- [ ] Android network security config blocks cleartext
+- [ ] iOS ATS not weakened
 - [ ] iOS Privacy Manifest configured
-- [ ] Android network security config set
-- [ ] Dependencies audited for vulnerabilities
-- [ ] env.json / .env files in .gitignore
+- [ ] Minimum permissions requested (audit `AndroidManifest.xml` and `Info.plist`)
+- [ ] Deep links use Universal Links / App Links (not custom schemes for sensitive flows)
+
+### Tier 3 (Sensitive Data Apps) — includes all Tier 1 + 2
+
+- [ ] Certificate pinning on critical endpoints with rotation plan documented
+- [ ] Backup pins configured for next certificate rotation
+- [ ] Kill switch for pinning failures (remote config)
+- [ ] Biometric auth gates sensitive operations (with PIN fallback)
+- [ ] Screenshot prevention on sensitive screens
+- [ ] Root/jailbreak detection as defense-in-depth signal
+- [ ] Sensitive data never logged (audit all logger calls)
+- [ ] Data encryption for database/files if required by compliance

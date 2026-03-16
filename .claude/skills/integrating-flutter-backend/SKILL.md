@@ -1,640 +1,228 @@
 ---
 name: integrating-flutter-backend
-description: Backend integration patterns for Flutter apps. Use when implementing REST APIs with Dio, Firebase services (Firestore, Auth, Storage), GraphQL clients, or repository pattern with error handling. Covers interceptors, serialization, real-time streams, and Either/Result patterns.
+description: Backend integration decisions for Flutter apps. Use when choosing between REST/Firebase/GraphQL, selecting HTTP clients, designing repository patterns, implementing error handling strategies, or configuring authentication flows. Decision-first guide — code templates in REFERENCE.md.
 ---
 
 # Integrating Flutter Backend
 
-Comprehensive guide for connecting Flutter apps to backend services. Covers REST APIs, Firebase, GraphQL, and architectural patterns for clean data access.
+Decision guide for connecting Flutter apps to backend services. Focuses on WHEN and WHY to use each approach. For full code templates, see [REFERENCE.md](REFERENCE.md).
 
 ## When to Use This Skill
 
-- Setting up Dio HTTP client with interceptors
-- Implementing Firebase services (Firestore, Auth, Storage, FCM)
-- Building GraphQL clients with graphql_flutter
-- Designing repository pattern with Either/Result error handling
-- Configuring authentication flows (JWT, OAuth, Firebase Auth)
-- Implementing real-time data streams
+- Choosing between REST API, Firebase, or GraphQL
+- Selecting an HTTP client (Dio vs http)
+- Designing repository pattern and error handling
+- Implementing authentication flows
+- Deciding serialization strategy
 
-## REST API Integration with Dio
+## Backend Technology Decision
 
-### Dio Client Setup
+Choose your backend integration based on your situation, not your preference:
+
+| Situation | Recommended | Why |
+|-----------|-------------|-----|
+| Existing REST API | Dio + Repository pattern | API contract already defined; wrap it cleanly |
+| Greenfield with real-time needs | Firebase (Firestore) | Built-in real-time streams, offline persistence, auth |
+| Complex nested data from single API | GraphQL (graphql_flutter) | Fetch exactly what you need; avoid N+1 REST calls |
+| Simple CRUD, no real-time | REST or Firebase | Either works; pick based on team familiarity |
+| Multiple data sources (API + cache) | Repository pattern + Either | Abstraction lets you swap/combine sources |
+
+**When NOT each:**
+- **REST**: Avoid when you need real-time sync — polling is wasteful vs Firestore streams
+- **Firebase**: Avoid when you need complex queries (joins, aggregations) — Firestore is a document DB, not SQL
+- **GraphQL**: Avoid for simple CRUD with flat data — the schema/codegen overhead isn't worth it
+
+## HTTP Client Selection
+
+| Client | Use When | Skip When |
+|--------|----------|-----------|
+| `http` package | Simple GET/POST, no auth, <3 endpoints | Need interceptors, retry, or multipart uploads |
+| `Dio` | Interceptors (auth, retry, logging), cancel tokens, multipart | Simple scripts or one-off API calls |
+| `Retrofit` (on Dio) | 5+ typed endpoints, want compile-time API contract | <5 endpoints — code-gen overhead exceeds benefit |
 
 ```dart
-import 'package:dio/dio.dart';
+// Dio is the default choice for production apps because interceptors
+// compose cleanly: auth → retry → logging → error mapping.
+// The http package can't do this without manual wrapper code.
+final dio = Dio(BaseOptions(
+  baseUrl: 'https://api.example.com',
+  connectTimeout: const Duration(seconds: 10),
+  receiveTimeout: const Duration(seconds: 5),
+));
+```
 
-class ApiClient {
-  late final Dio _dio;
+## Authentication Strategy
 
-  ApiClient({required String baseUrl, String? authToken}) {
-    _dio = Dio(BaseOptions(
-      baseUrl: baseUrl,
-      connectTimeout: const Duration(seconds: 10),
-      receiveTimeout: const Duration(seconds: 5),
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    ));
-    _setupInterceptors();
-  }
+Two distinct approaches — choose based on your backend:
 
-  void _setupInterceptors() {
-    _dio.interceptors.addAll([
-      _AuthInterceptor(),
-      _RetryInterceptor(),
-      _ErrorInterceptor(),
-      LogInterceptor(requestBody: true, responseBody: true),
-    ]);
-  }
+### Firebase Auth (Firebase backend)
 
-  Dio get dio => _dio;
+Firebase Auth manages token refresh automatically. Do NOT add a Dio auth interceptor on top — you'll have redundant, potentially conflicting refresh logic.
+
+```dart
+// Firebase Auth handles token refresh internally.
+// Just get the current token when needed:
+final token = await FirebaseAuth.instance.currentUser?.getIdToken();
+// Pass to Dio via a simple interceptor that reads (never refreshes) the token.
+```
+
+### JWT/OAuth (Custom REST backend)
+
+Use a Dio auth interceptor that attaches tokens and handles 401 refresh. See [Auth Interceptor in REFERENCE.md](REFERENCE.md#authentication-interceptor).
+
+```dart
+// The interceptor pattern works because:
+// 1. Transparent to all API calls (no per-request auth code)
+// 2. Automatic retry after refresh (caller doesn't know a refresh happened)
+// 3. Single place to handle logout on refresh failure
+```
+
+**Decision:** If your backend is Firebase, use Firebase Auth directly. If custom REST, use Dio auth interceptor. Never both.
+
+## Retry Strategy
+
+Retry transient failures (timeouts, 5xx) but with critical safety rules:
+
+```dart
+bool _shouldRetry(DioException err) {
+  // Only retry on transient server/network errors
+  return err.type == DioExceptionType.connectionTimeout ||
+      err.type == DioExceptionType.receiveTimeout ||
+      (err.response?.statusCode ?? 0) >= 500;
 }
 ```
 
-### Authentication Interceptor
+### CRITICAL: Idempotency Rule
+
+**NEVER retry non-idempotent operations (POST, PATCH) without an idempotency key.** Retrying a `POST /orders` without a unique request ID creates duplicate orders.
 
 ```dart
-class _AuthInterceptor extends Interceptor {
-  @override
-  void onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
-    final token = await TokenStorage.getAccessToken();
-    if (token != null) {
-      options.headers['Authorization'] = 'Bearer $token';
-    }
-    handler.next(options);
-  }
+// SAFE: GET and DELETE are idempotent — retry freely
+// SAFE: PUT replaces the resource — retry freely
+// DANGEROUS: POST creates a new resource — retry ONLY with idempotency key
 
-  @override
-  void onError(DioException err, ErrorInterceptorHandler handler) async {
-    if (err.response?.statusCode == 401) {
-      try {
-        final newToken = await _refreshToken();
-        final opts = err.requestOptions;
-        opts.headers['Authorization'] = 'Bearer $newToken';
-        final response = await Dio().fetch(opts);
-        return handler.resolve(response);
-      } catch (_) {
-        return handler.reject(err);
-      }
-    }
-    handler.next(err);
-  }
+// Add idempotency key for non-idempotent retries:
+options.headers['Idempotency-Key'] = uuid.v4();
+```
 
-  Future<String> _refreshToken() async {
-    final refreshToken = await TokenStorage.getRefreshToken();
-    final response = await Dio().post(
-      '/auth/refresh',
-      data: {'refresh_token': refreshToken},
-    );
-    final newToken = response.data['access_token'] as String;
-    await TokenStorage.saveAccessToken(newToken);
-    return newToken;
+**When NOT to retry:**
+- 4xx errors (client mistakes — retrying won't fix bad input)
+- 401 (handle via auth interceptor, not retry)
+- Non-idempotent requests without idempotency keys
+
+Full implementation: [Retry Interceptor in REFERENCE.md](REFERENCE.md#retry-interceptor).
+
+## Error Handling Strategy
+
+Three approaches exist — don't mix them without a clear boundary:
+
+| Approach | Use When | Layer |
+|----------|----------|-------|
+| `Either<Failure, T>` | Repository returns to controller; caller MUST handle both paths | Data → Domain boundary |
+| `AsyncValue` (Riverpod) | Controller exposes state to UI; loading/error/data states | Presentation layer |
+| Exceptions (throw/catch) | Internal to a layer; unexpected errors, infrastructure failures | Within Data layer |
+
+```dart
+// Either forces the caller to handle failure — can't accidentally ignore errors.
+// Use when crossing layer boundaries (data → domain → presentation).
+Future<Either<Failure, User>> getUser(String id) async {
+  try {
+    final doc = await _firestore.collection('users').doc(id).get();
+    if (!doc.exists) return Left(NotFoundFailure('User $id not found'));
+    return Right(UserModel.fromJson(doc.data()!).toEntity());
+  } on FirebaseException catch (e) {
+    return Left(ServerFailure(e.message ?? 'Firestore error'));
   }
 }
 ```
 
-### Retry Interceptor
+**When Either is overkill:** Simple apps with <3 failure types. If you only distinguish "success" vs "error", `AsyncValue.guard()` in your controller is simpler than `Either` + `Failure` hierarchy.
+
+### Sealed Failure Types
+
+Use Dart 3 sealed classes for exhaustive error handling — the compiler ensures you handle every case:
 
 ```dart
-class _RetryInterceptor extends Interceptor {
-  final int maxRetries;
-  _RetryInterceptor({this.maxRetries = 3});
-
-  @override
-  void onError(DioException err, ErrorInterceptorHandler handler) async {
-    final retryCount = err.requestOptions.extra['retry_count'] as int? ?? 0;
-
-    if (_shouldRetry(err) && retryCount < maxRetries) {
-      err.requestOptions.extra['retry_count'] = retryCount + 1;
-      await Future.delayed(Duration(seconds: retryCount + 1));
-      try {
-        final response = await Dio().fetch(err.requestOptions);
-        return handler.resolve(response);
-      } catch (_) {}
-    }
-    handler.next(err);
-  }
-
-  bool _shouldRetry(DioException err) {
-    return err.type == DioExceptionType.connectionTimeout ||
-        err.type == DioExceptionType.receiveTimeout ||
-        (err.response?.statusCode ?? 0) >= 500;
-  }
-}
-```
-
-### Error Interceptor and Failure Types
-
-```dart
-class _ErrorInterceptor extends Interceptor {
-  @override
-  void onError(DioException err, ErrorInterceptorHandler handler) {
-    // Log error for debugging
-    handler.next(err);
-  }
-}
-
-// Failure hierarchy for Either pattern
+// Sealed = compiler enforces exhaustive matching in switch expressions.
+// Add new failure types and the compiler tells you everywhere to handle them.
 sealed class Failure {
   final String message;
   const Failure(this.message);
 }
-
-class NetworkFailure extends Failure {
-  const NetworkFailure(super.message);
-}
-
-class ServerFailure extends Failure {
-  final int? statusCode;
-  const ServerFailure(super.message, {this.statusCode});
-}
-
-class AuthFailure extends Failure {
-  const AuthFailure(super.message);
-}
-
-class NotFoundFailure extends Failure {
-  const NotFoundFailure(super.message);
-}
-
-class ValidationFailure extends Failure {
-  final Map<String, List<String>>? fieldErrors;
-  const ValidationFailure(super.message, {this.fieldErrors});
-}
+class NetworkFailure extends Failure { const NetworkFailure(super.message); }
+class ServerFailure extends Failure { const ServerFailure(super.message); }
+class AuthFailure extends Failure { const AuthFailure(super.message); }
+class NotFoundFailure extends Failure { const NotFoundFailure(super.message); }
+class ValidationFailure extends Failure { const ValidationFailure(super.message); }
 ```
 
-### Type-Safe API with Retrofit
+## Repository Pattern Decisions
+
+| Scenario | Repository Approach | Why |
+|----------|-------------------|-----|
+| 1-2 simple API calls | Direct Dio/Firestore in controller | Layer ceremony costs more than it saves |
+| 3+ endpoints, same data source | Concrete repository class | Testability, single responsibility |
+| Multiple data sources (API + cache) | Abstract interface + implementation | Swap/compose sources without touching callers |
+| 3+ Firestore collections with same CRUD | Generic `FirestoreRepository<T>` | Eliminate repetitive CRUD code |
+
+**When generic repository is overkill:** If each collection has unique query patterns (different filters, ordering, pagination), a generic repo forces awkward abstractions. Use collection-specific repos instead.
+
+Full implementations: [Repository Pattern in REFERENCE.md](REFERENCE.md#repository-pattern-with-either).
+
+## Firestore Data Modeling Decisions
+
+These are the actual hard decisions in Firestore integration — the CRUD code is trivial:
+
+| Decision | Choose A | Choose B |
+|----------|----------|----------|
+| Subcollections vs root | Data always accessed with parent (user's orders) | Data queried independently (all orders by date) |
+| Denormalize vs reference | Read-heavy, rarely updated (user name on every order) | Write-heavy, frequently updated (use reference + join) |
+| `withConverter<T>` vs raw maps | Production code (type safety, compile-time checks) | Prototyping or admin scripts (flexibility) |
+| Batch vs transaction | Independent writes (import 50 items) | Dependent writes (transfer: debit A, credit B) |
+
+## Serialization Strategy
+
+| Approach | Use When | Skip When |
+|----------|----------|-----------|
+| `Freezed` | Models need: immutability, copyWith, equality, sealed unions | Simple DTOs with only fromJson/toJson |
+| `json_serializable` | Just need fromJson/toJson, no copyWith | Models need immutability guarantees |
+| Manual fromJson | 1-2 simple models, avoiding build_runner | 5+ models — manual serialization doesn't scale |
 
 ```dart
-// pubspec.yaml dependencies:
-//   retrofit: ^4.9.0
-//   dio: ^5.7.0
-// dev_dependencies:
-//   retrofit_generator: ^9.2.0
-//   build_runner: ^2.4.0
-
-import 'package:retrofit/retrofit.dart';
-import 'package:dio/dio.dart';
-
-part 'api_service.g.dart';
-
-@RestApi()
-abstract class ApiService {
-  factory ApiService(Dio dio, {String baseUrl}) = _ApiService;
-
-  @GET('/items')
-  Future<List<ItemModel>> getItems(
-    @Query('page') int page,
-    @Query('limit') int limit,
-  );
-
-  @GET('/items/{id}')
-  Future<ItemModel> getItem(@Path('id') String id);
-
-  @POST('/items')
-  Future<ItemModel> createItem(@Body() ItemModel item);
-
-  @PUT('/items/{id}')
-  Future<ItemModel> updateItem(@Path('id') String id, @Body() ItemModel item);
-
-  @DELETE('/items/{id}')
-  Future<void> deleteItem(@Path('id') String id);
-
-  @POST('/upload')
-  @MultiPart()
-  Future<String> uploadFile(@Part(name: 'file') File file);
-}
-
-// Generate: dart run build_runner build
-```
-
-## Repository Pattern with Either
-
-### Abstract Repository
-
-```dart
-import 'package:dartz/dartz.dart'; // or fpdart
-
-abstract class ItemRepository {
-  Future<Either<Failure, List<Item>>> getItems({int page = 1, int limit = 20});
-  Future<Either<Failure, Item>> getItem(String id);
-  Future<Either<Failure, Item>> createItem(Item item);
-  Future<Either<Failure, Item>> updateItem(Item item);
-  Future<Either<Failure, void>> deleteItem(String id);
-}
-```
-
-### Repository Implementation
-
-```dart
-class ItemRepositoryImpl implements ItemRepository {
-  final ApiClient _apiClient;
-
-  ItemRepositoryImpl(this._apiClient);
-
-  @override
-  Future<Either<Failure, List<Item>>> getItems({
-    int page = 1,
-    int limit = 20,
-  }) async {
-    try {
-      final response = await _apiClient.dio.get(
-        '/items',
-        queryParameters: {'page': page, 'limit': limit},
-      );
-      final items = (response.data as List)
-          .map((json) => ItemModel.fromJson(json))
-          .toList();
-      return Right(items);
-    } on DioException catch (e) {
-      return Left(_mapDioException(e));
-    } catch (e) {
-      return Left(ServerFailure('Unexpected error: $e'));
-    }
-  }
-
-  Failure _mapDioException(DioException e) {
-    switch (e.type) {
-      case DioExceptionType.connectionTimeout:
-      case DioExceptionType.receiveTimeout:
-        return const NetworkFailure('Connection timeout');
-      case DioExceptionType.badResponse:
-        return _mapStatusCode(e.response?.statusCode, e.response?.data);
-      default:
-        return const NetworkFailure('Network error');
-    }
-  }
-
-  Failure _mapStatusCode(int? code, dynamic data) => switch (code) {
-    400 => ValidationFailure(data?['message'] ?? 'Bad request'),
-    401 => const AuthFailure('Unauthorized'),
-    403 => const AuthFailure('Forbidden'),
-    404 => const NotFoundFailure('Resource not found'),
-    _ => ServerFailure('Server error', statusCode: code),
-  };
-}
-```
-
-## Firebase Integration
-
-### Firebase Setup
-
-```bash
-# Install FlutterFire CLI
-dart pub global activate flutterfire_cli
-
-# Configure project (creates firebase_options.dart)
-flutterfire configure
-```
-
-```dart
-// main.dart
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
-
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const MyApp());
-}
-```
-
-### Firestore Repository
-
-```dart
-import 'package:cloud_firestore/cloud_firestore.dart';
-
-class FirestoreRepository<T> {
-  final FirebaseFirestore _firestore;
-  final String collectionPath;
-  final T Function(Map<String, dynamic> json) fromJson;
-  final Map<String, dynamic> Function(T item) toJson;
-
-  FirestoreRepository({
-    required this.collectionPath,
-    required this.fromJson,
-    required this.toJson,
-    FirebaseFirestore? firestore,
-  }) : _firestore = firestore ?? FirebaseFirestore.instance;
-
-  CollectionReference<T> get _collection =>
-      _firestore.collection(collectionPath).withConverter<T>(
-            fromFirestore: (snap, _) => fromJson(snap.data()!),
-            toFirestore: (item, _) => toJson(item),
-          );
-
-  // One-time fetch
-  Future<T?> get(String id) async {
-    final snap = await _collection.doc(id).get();
-    return snap.data();
-  }
-
-  // Real-time stream (single document)
-  Stream<T?> watch(String id) {
-    return _collection.doc(id).snapshots().map((snap) => snap.data());
-  }
-
-  // Real-time stream (collection)
-  Stream<List<T>> watchAll({Query<T> Function(Query<T>)? queryBuilder}) {
-    Query<T> query = _collection;
-    if (queryBuilder != null) query = queryBuilder(query);
-    return query.snapshots().map(
-      (snap) => snap.docs.map((doc) => doc.data()).toList(),
-    );
-  }
-
-  // Create
-  Future<String> create(T item) async {
-    final ref = await _collection.add(item);
-    return ref.id;
-  }
-
-  // Create with specific ID
-  Future<void> set(String id, T item, {bool merge = false}) async {
-    await _collection.doc(id).set(item, SetOptions(merge: merge));
-  }
-
-  // Update fields
-  Future<void> update(String id, Map<String, dynamic> data) async {
-    await _firestore.collection(collectionPath).doc(id).update(data);
-  }
-
-  // Delete
-  Future<void> delete(String id) async {
-    await _collection.doc(id).delete();
-  }
-
-  // Batch write
-  Future<void> batchWrite(List<BatchOp<T>> operations) async {
-    final batch = _firestore.batch();
-    for (final op in operations) {
-      final ref = _collection.doc(op.id);
-      switch (op) {
-        case BatchSet<T>():
-          batch.set(ref, op.item);
-        case BatchUpdate<T>():
-          batch.update(ref as DocumentReference<Map<String, dynamic>>, op.data);
-        case BatchDelete<T>():
-          batch.delete(ref);
-      }
-    }
-    await batch.commit();
-  }
-}
-
-// Batch operation types
-sealed class BatchOp<T> {
-  final String id;
-  const BatchOp(this.id);
-}
-
-class BatchSet<T> extends BatchOp<T> {
-  final T item;
-  const BatchSet(super.id, this.item);
-}
-
-class BatchUpdate<T> extends BatchOp<T> {
-  final Map<String, dynamic> data;
-  const BatchUpdate(super.id, this.data);
-}
-
-class BatchDelete<T> extends BatchOp<T> {
-  const BatchDelete(super.id);
-}
-```
-
-### Firebase Auth Service
-
-```dart
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-
-class AuthService {
-  final FirebaseAuth _auth;
-  final GoogleSignIn _googleSignIn;
-
-  AuthService({FirebaseAuth? auth, GoogleSignIn? googleSignIn})
-      : _auth = auth ?? FirebaseAuth.instance,
-        _googleSignIn = googleSignIn ?? GoogleSignIn();
-
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
-  User? get currentUser => _auth.currentUser;
-
-  Future<Either<Failure, UserCredential>> signInWithEmail(
-    String email, String password,
-  ) async {
-    try {
-      final result = await _auth.signInWithEmailAndPassword(
-        email: email, password: password,
-      );
-      return Right(result);
-    } on FirebaseAuthException catch (e) {
-      return Left(AuthFailure(_mapAuthCode(e.code)));
-    }
-  }
-
-  Future<Either<Failure, UserCredential>> signInWithGoogle() async {
-    try {
-      final googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return Left(const AuthFailure('Cancelled'));
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      return Right(await _auth.signInWithCredential(credential));
-    } on FirebaseAuthException catch (e) {
-      return Left(AuthFailure(_mapAuthCode(e.code)));
-    }
-  }
-
-  Future<void> signOut() async {
-    await Future.wait([_auth.signOut(), _googleSignIn.signOut()]);
-  }
-
-  String _mapAuthCode(String code) => switch (code) {
-    'user-not-found' => 'No account found for this email',
-    'wrong-password' => 'Wrong password',
-    'email-already-in-use' => 'An account already exists for this email',
-    'weak-password' => 'Password is too weak',
-    'too-many-requests' => 'Too many attempts. Try again later',
-    _ => 'Authentication failed',
-  };
-}
-```
-
-### Firebase Storage
-
-```dart
-import 'package:firebase_storage/firebase_storage.dart';
-import 'dart:io';
-
-class StorageService {
-  final FirebaseStorage _storage;
-
-  StorageService({FirebaseStorage? storage})
-      : _storage = storage ?? FirebaseStorage.instance;
-
-  Future<String> uploadFile({
-    required File file,
-    required String path,
-    void Function(double)? onProgress,
-  }) async {
-    final ref = _storage.ref().child(path);
-    final task = ref.putFile(file);
-
-    if (onProgress != null) {
-      task.snapshotEvents.listen((snap) {
-        onProgress(snap.bytesTransferred / snap.totalBytes);
-      });
-    }
-
-    await task;
-    return await ref.getDownloadURL();
-  }
-
-  Future<void> deleteFile(String path) async {
-    await _storage.ref().child(path).delete();
-  }
-}
-```
-
-## GraphQL Integration
-
-### Setup with graphql_flutter
-
-```yaml
-# pubspec.yaml
-dependencies:
-  graphql_flutter: ^5.1.0
-```
-
-```dart
-import 'package:graphql_flutter/graphql_flutter.dart';
-
-class GraphQLService {
-  late final GraphQLClient _client;
-
-  GraphQLService({required String endpoint, String? authToken}) {
-    final httpLink = HttpLink(endpoint);
-    final authLink = AuthLink(getToken: () async => 'Bearer $authToken');
-    final link = authLink.concat(httpLink);
-
-    _client = GraphQLClient(
-      link: link,
-      cache: GraphQLCache(store: InMemoryStore()),
-    );
-  }
-
-  Future<Either<Failure, T>> query<T>({
-    required String document,
-    Map<String, dynamic>? variables,
-    required T Function(Map<String, dynamic>) parser,
-  }) async {
-    try {
-      final result = await _client.query(QueryOptions(
-        document: gql(document),
-        variables: variables ?? {},
-      ));
-      if (result.hasException) {
-        return Left(ServerFailure(result.exception.toString()));
-      }
-      return Right(parser(result.data!));
-    } catch (e) {
-      return Left(ServerFailure(e.toString()));
-    }
-  }
-
-  Future<Either<Failure, T>> mutate<T>({
-    required String document,
-    Map<String, dynamic>? variables,
-    required T Function(Map<String, dynamic>) parser,
-  }) async {
-    try {
-      final result = await _client.mutate(MutationOptions(
-        document: gql(document),
-        variables: variables ?? {},
-      ));
-      if (result.hasException) {
-        return Left(ServerFailure(result.exception.toString()));
-      }
-      return Right(parser(result.data!));
-    } catch (e) {
-      return Left(ServerFailure(e.toString()));
-    }
-  }
-
-  Stream<T> subscribe<T>({
-    required String document,
-    Map<String, dynamic>? variables,
-    required T Function(Map<String, dynamic>) parser,
-  }) {
-    return _client
-        .subscribe(SubscriptionOptions(
-          document: gql(document),
-          variables: variables ?? {},
-        ))
-        .where((result) => !result.hasException && result.data != null)
-        .map((result) => parser(result.data!));
-  }
-}
-```
-
-## JSON Serialization with Freezed
-
-```dart
-// pubspec.yaml dependencies:
-//   freezed_annotation: ^3.0.0
-//   json_annotation: ^4.9.0
-// dev_dependencies:
-//   freezed: ^3.0.0
-//   json_serializable: ^6.8.0
-//   build_runner: ^2.4.0
-
-import 'package:freezed_annotation/freezed_annotation.dart';
-
-part 'item_model.freezed.dart';
-part 'item_model.g.dart';
-
+// Freezed is the default for domain models because it gives you
+// immutability + copyWith + equality + JSON serialization in one annotation.
+// json_serializable alone is sufficient for data-layer DTOs that just
+// shuttle JSON to/from the API without domain behavior.
 @freezed
-class ItemModel with _$ItemModel {
-  const factory ItemModel({
+class Product with _$Product {
+  const factory Product({
     required String id,
     required String name,
     @JsonKey(name: 'created_at') required DateTime createdAt,
-    @Default(false) bool isActive,
-    String? description,
-  }) = _ItemModel;
-
-  factory ItemModel.fromJson(Map<String, dynamic> json) =>
-      _$ItemModelFromJson(json);
+  }) = _Product;
+  factory Product.fromJson(Map<String, dynamic> json) => _$ProductFromJson(json);
 }
-
-// Generate: dart run build_runner build --delete-conflicting-outputs
 ```
 
-## Decision Guide
+## Real-Time Data Decisions
 
-| Scenario | Recommended Approach |
-|----------|---------------------|
-| REST API with auth | Dio + AuthInterceptor + Retrofit |
-| Firebase backend | FlutterFire plugins + withConverter |
-| Real-time data | Firestore streams or GraphQL subscriptions |
-| Error handling | Either<Failure, T> in repositories |
-| Serialization | Freezed for models, json_serializable for simple DTOs |
-| File uploads | Firebase Storage or Dio MultipartFile |
-| Offline support | Firestore offline persistence or Hive cache |
-| Token refresh | Dio AuthInterceptor with automatic retry |
+| Source | Pattern | Use When |
+|--------|---------|----------|
+| Firestore | `StreamProvider` wrapping `snapshots()` | Real-time document/collection updates |
+| WebSocket | `StreamProvider` wrapping WebSocket stream | Custom backend real-time |
+| Polling | `Timer` + `ref.invalidate()` | REST API without real-time support |
+
+**Firestore offline:** Firestore has built-in offline persistence (enabled by default on mobile). Don't add Hive/SharedPreferences as a cache layer on top — it's redundant. Use Hive only for data that doesn't come from Firestore.
 
 ## Common Pitfalls
 
 | Pitfall | Fix |
 |---------|-----|
-| Not handling null Firestore documents | Always check `snap.exists` before accessing data |
-| Throwing exceptions from repositories | Return `Either<Failure, T>` instead |
-| Forgetting to dispose stream subscriptions | Use `ref.onDispose()` or `StreamSubscription.cancel()` |
-| Hardcoding base URLs | Use environment configuration or flavor-based URLs |
-| Missing retry logic for transient errors | Add RetryInterceptor for timeouts and 5xx errors |
-| Silent error swallowing | Always log errors before returning Left |
-| Not cancelling requests on navigation | Use `CancelToken` and cancel in dispose |
+| Not handling null Firestore documents | Always check `snap.exists` before accessing `.data()` |
+| Throwing exceptions from repositories | Return `Either<Failure, T>` instead — callers can't forget to handle |
+| Forgetting to dispose stream subscriptions | Use `ref.onDispose()` in providers or `cancel()` in StatefulWidgets |
+| Hardcoding base URLs | Use `--dart-define-from-file` or flavor-based configuration |
+| Retrying POST without idempotency key | Add `Idempotency-Key` header or skip retry for non-idempotent ops |
+| Using Dio auth interceptor with Firebase Auth | Firebase handles token refresh — interceptor causes conflicts |
+| Silent error swallowing in catch blocks | Always log errors before returning `Left()` |
+| Adding Hive cache on top of Firestore | Firestore has built-in offline persistence — Hive is redundant |

@@ -95,18 +95,18 @@ flutter analyze                                # No new warnings
 - Add regression tests when appropriate
 
 ### ❌ This Agent Does NOT
-- Refactor code during debugging (fix only)
-- Add new features while fixing bugs
-- Ignore architecture boundaries for quick fixes
-- Suppress errors without understanding them
+- Refactor code during debugging — refactoring introduces new variables that obscure root cause isolation; fix first, refactor in a separate commit
+- Add new features while fixing bugs — mixing features and fixes makes it impossible to revert one without the other
+- Ignore architecture boundaries for quick fixes — cross-layer fixes create coupling that makes future debugging harder, compounding the problem
+- Suppress errors without understanding them — suppressed errors become silent failures that surface later in harder-to-diagnose contexts
 
 ## Quality Checklist
 
 Before completing:
-- [ ] Root cause identified (not just symptom suppressed)
-- [ ] Minimal fix implemented (no unnecessary changes)
-- [ ] All related tests pass
-- [ ] `flutter analyze` shows no new warnings
-- [ ] Code generation run if needed
-- [ ] Architecture boundaries respected in the fix
-- [ ] Regression test added if applicable
+- [ ] Root cause identified (not just symptom suppressed) → suppressed symptoms resurface later in harder-to-diagnose contexts
+- [ ] Minimal fix implemented (no unnecessary changes) → extra changes introduce new variables, making it unclear if the fix actually worked
+- [ ] All related tests pass → passing tests confirm the fix works and didn't break adjacent functionality
+- [ ] `flutter analyze` shows no new warnings → new warnings from the fix indicate introduced type errors or deprecation issues
+- [ ] Code generation run if needed → stale generated code causes build errors that mask whether the actual fix works
+- [ ] Architecture boundaries respected in the fix → cross-layer fixes create coupling that makes future debugging harder
+- [ ] Regression test added if applicable → without a regression test, the same bug can reappear after future refactoring

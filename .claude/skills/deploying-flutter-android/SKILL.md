@@ -5,7 +5,9 @@ description: Android deployment guide for Flutter apps. Use when creating keysto
 
 # Deploying Flutter Android
 
-Complete guide for deploying Flutter apps to the Google Play Store, from keystore creation through production rollout.
+Guide for deploying Flutter apps to the Google Play Store — focused on decisions, trade-offs, and the WHY behind each step.
+
+**Templates and full configs:** See `REFERENCE.md` in this skill directory.
 
 ## When to Use This Skill
 
@@ -21,15 +23,25 @@ Complete guide for deploying Flutter apps to the Google Play Store, from keystor
 
 ```bash
 # Google Play Console account ($25 one-time fee)
-# https://play.google.com/console/signup
-# Processing time: ~48 hours for activation
+# WHY one-time vs Apple's annual: Google's model has lower barrier to entry,
+# but the $25 fee helps filter spam submissions.
+# Processing time: ~48 hours for new account activation.
 
-# Android Studio (for SDK and tools)
 flutter doctor
 flutter doctor --android-licenses
+# WHY accept licenses: Required for building release APKs/AABs.
+# These are Google's SDK license agreements.
 ```
 
 ## Keystore and Signing
+
+### The Two-Key System
+
+**WHY Android has two keys:**
+1. **App Signing Key** — Google manages this (Play App Signing). Signs the APK users download.
+2. **Upload Key** — You manage this. Signs the AAB you upload to Play Console.
+
+This separation means: if you lose your upload key, Google can reset it. If there were only one key and you lost it, your app would be permanently un-updatable.
 
 ### Create Upload Keystore
 
@@ -40,222 +52,85 @@ keytool -genkey -v -keystore ~/upload-keystore.jks \
   -validity 10000 \
   -alias upload
 
-# CRITICAL: Back up this file securely. Loss = cannot update app.
-# Record passwords in a password manager.
+# WHY 10000 days validity: ~27 years. Your upload key must outlive your app.
+# A shorter validity means you'd need to re-register with Play Console.
+#
+# CRITICAL: Back up this file securely (password manager, encrypted drive).
+# Loss = cannot update your app until Google resets your upload key.
 ```
 
 ### Configure Signing
 
 ```properties
-# android/key.properties (CREATE THIS FILE — add to .gitignore)
+# android/key.properties (CREATE THIS — add to .gitignore)
+# WHY a separate file: Keeps secrets out of build.gradle,
+# which IS committed to git. key.properties is gitignored.
 storePassword=your-keystore-password
 keyPassword=your-key-password
 keyAlias=upload
 storeFile=/Users/yourname/upload-keystore.jks
 ```
 
-```groovy
-// android/app/build.gradle
+See `REFERENCE.md` for the complete `build.gradle` signing configuration.
 
-// Load keystore properties
-def keystoreProperties = new Properties()
-def keystorePropertiesFile = rootProject.file('key.properties')
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-}
+## AAB vs APK: Which to Build
 
-android {
-    namespace "com.yourcompany.appname"
-    compileSdk 35
-
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = '17'
-    }
-
-    defaultConfig {
-        applicationId "com.yourcompany.appname"
-        minSdk 21
-        targetSdk 35  // Required for new Play Store submissions (Aug 2025+)
-        versionCode flutterVersionCode.toInteger()
-        versionName flutterVersionName
-        multiDexEnabled true
-    }
-
-    signingConfigs {
-        release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile keystoreProperties['storeFile'] ?
-                file(keystoreProperties['storeFile']) : null
-            storePassword keystoreProperties['storePassword']
-        }
-    }
-
-    buildTypes {
-        release {
-            signingConfig signingConfigs.release
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile(
-                'proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
-    }
-}
-```
-
-### Product Flavors (Optional)
-
-```groovy
-android {
-    flavorDimensions "environment"
-    productFlavors {
-        dev {
-            dimension "environment"
-            applicationIdSuffix ".dev"
-            versionNameSuffix "-dev"
-        }
-        staging {
-            dimension "environment"
-            applicationIdSuffix ".staging"
-            versionNameSuffix "-staging"
-        }
-        prod {
-            dimension "environment"
-        }
-    }
-}
-```
+| Format | Choose When | Why |
+|--------|------------|-----|
+| **AAB** (App Bundle) | Always for Play Store | Google generates optimized APKs per device — 15-30% smaller downloads |
+| **APK** | Direct distribution (no store) | Self-contained, no Google Play processing needed |
+| **Split APK** | Testing size per architecture | Useful for debugging; Play Store handles this automatically for AABs |
 
 ```bash
-# Build specific flavor
-flutter build appbundle --flavor prod --release
-```
-
-## ProGuard / R8 Configuration
-
-```proguard
-# android/app/proguard-rules.pro
-
-# Flutter
--keep class io.flutter.app.** { *; }
--keep class io.flutter.plugin.** { *; }
--keep class io.flutter.util.** { *; }
--keep class io.flutter.view.** { *; }
--keep class io.flutter.** { *; }
--keep class io.flutter.plugins.** { *; }
-
-# Keep application class
--keep class com.yourcompany.yourapp.** { *; }
-
-# Firebase (if used)
--keep class com.google.firebase.** { *; }
--dontwarn com.google.firebase.**
-
-# Gson (if used)
--keepattributes Signature
--keepattributes *Annotation*
--keep class com.google.gson.** { *; }
-
-# Native methods
--keepclasseswithmembernames class * {
-    native <methods>;
-}
-```
-
-**Debugging R8 issues:**
-```groovy
-// Temporarily disable to isolate problems
-buildTypes {
-    release {
-        minifyEnabled false  // Disable temporarily
-        shrinkResources false
-    }
-}
-```
-
-## Building for Release
-
-### Version Management
-
-```yaml
-# pubspec.yaml
-version: 1.0.0+1
-# version: User-facing version string
-# +1: versionCode (must increment for every Play Store upload)
-```
-
-### Build App Bundle (Recommended)
-
-```bash
-flutter clean
-flutter pub get
-
-# Build AAB (preferred by Google Play)
+# AAB (default choice for Play Store)
 flutter build appbundle --release
 
-# Output: build/app/outputs/bundle/release/app-release.aab
-```
-
-### Build APK (Alternative)
-
-```bash
-# Single APK
+# APK (only for direct distribution or testing)
 flutter build apk --release
-
-# Split by ABI (smaller per-device downloads)
-flutter build apk --release --split-per-abi
-# Outputs: app-armeabi-v7a-release.apk
-#          app-arm64-v8a-release.apk
-#          app-x86_64-release.apk
 ```
 
-### 16KB Page Size Alignment
+**WHY AAB is required:** Google Play requires AAB for new apps. It enables Dynamic Delivery — users only download the code and resources their specific device needs.
 
-Since November 2025, Google Play requires 16KB page size support:
-- Use NDK r28+, AGP 8.5.1+, Gradle 8.14+
-- Flutter 3.22+ handles this automatically with recommended versions
+## Product Flavors: When to Use
+
+| Situation | Use Flavors? | Why |
+|-----------|-------------|-----|
+| Single environment | **No** | Unnecessary complexity |
+| Dev + Prod backends | **Yes** | Different `applicationId` means both can be installed simultaneously for testing |
+| White-label apps | **Yes** | Different branding, icons, and bundle IDs per client |
+| A/B testing at build level | **Rarely** | Use Remote Config instead — no separate builds needed |
+
+**WHY `applicationIdSuffix`:** Adding `.dev` creates `com.yourcompany.app.dev` — a completely separate app from the user's perspective. You can have dev and prod installed side by side on the same device.
+
+See `REFERENCE.md` for the flavors template.
+
+## ProGuard / R8: When and Why
+
+**WHY R8 matters:** R8 (ProGuard's successor, built into Android) removes unused code and obfuscates class names. This makes your APK smaller and harder to reverse-engineer.
+
+| Setting | Default | WHY |
+|---------|---------|-----|
+| `minifyEnabled true` | Off | Shrinks code — removes unused classes. Can break reflection-based libraries (Firebase, Gson). |
+| `shrinkResources true` | Off | Removes unused resources (images, strings). Requires `minifyEnabled`. |
+
+**WHY you need `-keep` rules:** R8 removes code it thinks is unused. But libraries using reflection (Firebase, Gson) access classes by name at runtime — R8 can't see those references. The `-keep` rules tell R8 "don't remove these."
+
+**Debugging strategy:** If release builds crash but debug works, R8 is removing something needed. Temporarily set `minifyEnabled false` to confirm, then add specific `-keep` rules.
+
+See `REFERENCE.md` for the complete ProGuard rules template.
 
 ## Google Play Console
 
-### Create App
+### Release Tracks: Decision Guide
 
-1. https://play.google.com/console → Create app
-2. Fill: App name, language, app/game, free/paid
-3. Accept Developer Program Policies
+| Track | When to Use | Why This Track |
+|-------|------------|----------------|
+| **Internal** | Every build, first | Instant access, no review, up to 100 testers. Catches obvious issues before wider release. |
+| **Closed** | Feature validation with selected users | Invite-only. Good for beta features you don't want public yet. |
+| **Open** | Public beta | Anyone can join (up to 200K). Builds community trust. Requires Google review. |
+| **Production** | Launch / updates | Public release. Always use staged rollout for updates. |
 
-### Store Listing Metadata
-
-| Field | Limit |
-|-------|-------|
-| App name | 30 chars |
-| Short description | 80 chars |
-| Full description | 4000 chars |
-| App icon | 512 x 512 px, PNG |
-| Feature graphic | 1024 x 500 px |
-| Phone screenshots | 2-8, min 320px, max 3840px |
-
-### Data Safety Section (Required)
-
-Complete the data safety form thoroughly:
-- Declare all data types collected (including by SDKs)
-- Declare data sharing with third parties
-- Declare encryption and deletion practices
-- Privacy policy URL required
-- Non-compliance can lead to app removal
-
-### Release Tracks
-
-| Track | Purpose | Review |
-|-------|---------|--------|
-| Internal testing | Team testing, up to 100 testers | No review |
-| Closed testing | Invite-only beta, tester lists | Optional |
-| Open testing | Anyone can join (up to 200K) | Required |
-| Production | Public release | Required |
+**WHY Internal first, always:** Zero review delay. Your build is available within minutes. Use this as your "it builds and runs" gate before any wider distribution.
 
 ### Staged Rollout Strategy
 
@@ -263,196 +138,87 @@ Complete the data safety form thoroughly:
 Internal → Closed Beta → Production (10%) → 50% → 100%
 ```
 
-Monitor crash rate and ANR rate at each stage before expanding.
+**WHY staged rollout:** If a crash-inducing bug slips through testing, it only affects 10% of users. You can halt the rollout, fix, and re-release. Going straight to 100% means every user gets the bug.
+
+**Key metrics to monitor at each stage:**
+- **Crash rate**: Should be <1%. Halt if >2%.
+- **ANR rate** (App Not Responding): Should be <0.5%.
+- **Uninstall rate**: Spike = something broke or upset users.
+
+### Data Safety Section (Required)
+
+**WHY this is critical:** Google can remove your app for incomplete or inaccurate data safety declarations. Declare ALL data collection including by third-party SDKs (Firebase Analytics, crash reporting, ad networks).
+
+### Store Listing Metadata
+
+| Field | Limit | Optimization Tip |
+|-------|-------|-----------------|
+| App name | 30 chars | Front-load primary keyword |
+| Short description | 80 chars | Value proposition in one sentence |
+| Full description | 4000 chars | Keywords in first 2 sentences — Play search indexes this |
 
 ## Play App Signing
 
-Play App Signing is the default for new apps and required for AABs:
+**WHY Play App Signing exists:** Before PAS, if you lost your signing key, your app was dead — you'd have to publish under a new package name, losing all reviews and installs. PAS solves this.
 
-- Google manages app signing key in Cloud KMS
-- You sign uploads with your upload key only
-- Lost upload key can be reset via Play Console
-- Smaller APKs (Google generates optimized splits)
-
-### Export Signing Certificate
+- Google manages the app signing key in Cloud KMS (Hardware Security Module)
+- You only need your upload key
+- **Lost upload key? Google can reset it.** No more app death.
+- Required for AABs (which are required for new apps)
 
 ```bash
-# Get SHA fingerprints for Firebase, Maps, etc.
+# Get SHA fingerprints for Firebase, Maps API keys, etc.
+# WHY you need this: Firebase and Google Maps verify your app identity via
+# SHA fingerprint. You need BOTH the upload key SHA AND the app signing key SHA.
 keytool -list -v -keystore ~/upload-keystore.jks -alias upload
 
-# For Play App Signing, also get the app signing cert from:
-# Play Console → Setup → App Integrity → App signing tab
+# App signing key SHA: Play Console → Setup → App Integrity → App signing tab
 ```
 
-## Fastlane Automation
+## 16KB Page Size Alignment
 
-### Setup
+**WHY this matters (since November 2025):** Android 15+ devices use 16KB memory pages. Apps compiled for 4KB pages crash on these devices. Google Play now requires 16KB support.
 
-```bash
-sudo gem install fastlane
-cd android
-fastlane init
-```
+- Use NDK r28+, AGP 8.5.1+, Gradle 8.14+
+- Flutter 3.22+ handles this automatically with recommended tool versions
+- **Check:** If you pinned older NDK/AGP versions, update them
 
-### Service Account for API Access
+## Fastlane vs Manual: When to Automate
 
-1. Google Cloud Console → Enable "Google Play Android Developer API"
-2. IAM & Admin → Service Accounts → Create
-3. Create JSON key → Download as `api-key.json`
-4. Play Console → Users and permissions → Invite service account email → Grant "Release manager"
+| Situation | Choose | Why |
+|-----------|--------|-----|
+| First app, learning | **Manual** (Play Console) | Understand the upload flow before automating |
+| Releasing monthly+ | **Fastlane** | Manual uploads take 10-15 min; Fastlane takes 1-2 min |
+| CI/CD pipeline | **Fastlane** (required) | CI can't use Play Console GUI |
+| Staged rollout management | **Fastlane `promote`** | One command to expand rollout percentage |
 
-### Fastfile
+**WHY Fastlane needs a Service Account:** The Play Developer API requires authentication. A service account (JSON key) lets Fastlane upload without your personal Google credentials.
 
-```ruby
-# android/fastlane/Fastfile
-default_platform(:android)
-
-platform :android do
-  lane :internal do
-    gradle(task: "bundle", build_type: "Release")
-
-    upload_to_play_store(
-      track: 'internal',
-      aab: '../build/app/outputs/bundle/release/app-release.aab',
-      skip_upload_metadata: true,
-      skip_upload_images: true,
-      skip_upload_screenshots: true,
-    )
-  end
-
-  lane :beta do
-    gradle(task: "bundle", build_type: "Release")
-
-    upload_to_play_store(
-      track: 'beta',
-      aab: '../build/app/outputs/bundle/release/app-release.aab',
-      release_status: 'draft',
-    )
-  end
-
-  lane :production do
-    ensure_git_status_clean
-
-    gradle(task: "bundle", build_type: "Release")
-
-    upload_to_play_store(
-      track: 'production',
-      aab: '../build/app/outputs/bundle/release/app-release.aab',
-      release_status: 'draft',
-      rollout: '0.1',  # 10% staged rollout
-    )
-
-    git_commit(path: "app/build.gradle", message: "Version Bump")
-    add_git_tag(tag: "android/v#{get_version_name(
-      gradle_file_path: 'app/build.gradle')}")
-    push_to_git_remote
-  end
-
-  lane :promote do |options|
-    percentage = options[:percentage] || '0.5'
-    upload_to_play_store(
-      track: 'production',
-      rollout: percentage,
-      skip_upload_apk: true,
-      skip_upload_aab: true,
-      skip_upload_metadata: true,
-      skip_upload_images: true,
-      skip_upload_screenshots: true,
-    )
-  end
-end
-```
-
-### Run Fastlane
-
-```bash
-cd android
-fastlane internal                   # Internal testing
-fastlane beta                       # Closed beta
-fastlane production                 # Production (10% rollout)
-fastlane promote percentage:0.5     # Expand to 50%
-fastlane promote percentage:1.0     # Full rollout
-```
-
-## CI/CD with GitHub Actions
-
-```yaml
-# .github/workflows/android-deploy.yml
-name: Android Deploy
-on:
-  push:
-    tags: ['v*']
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.41.0'
-
-      - run: flutter pub get
-      - run: flutter test
-
-      - name: Decode keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/upload-keystore.jks
-
-      - name: Create key.properties
-        run: |
-          cat > android/key.properties <<EOF
-          storePassword=${{ secrets.STORE_PASSWORD }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          storeFile=../upload-keystore.jks
-          EOF
-
-      - run: flutter build appbundle --release
-
-      - name: Deploy to Play Store
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.0'
-      - run: gem install fastlane
-      - run: cd android && fastlane internal
-        env:
-          SUPPLY_JSON_KEY_DATA: ${{ secrets.PLAY_STORE_CONFIG_JSON }}
-```
-
-### Encode Keystore for CI
-
-```bash
-base64 -i upload-keystore.jks | pbcopy
-# Paste into GitHub Secrets as KEYSTORE_BASE64
-```
+See `REFERENCE.md` for Fastlane setup, Fastfile template, and CI/CD workflow.
 
 ## Pre-Submission Checklist
 
-- [ ] Version and versionCode updated in `pubspec.yaml`
+- [ ] Version and versionCode updated in `pubspec.yaml` (versionCode MUST be higher than previous upload)
 - [ ] `key.properties` configured and in `.gitignore`
-- [ ] Signing config in `build.gradle` correct
-- [ ] ProGuard rules cover all required classes
-- [ ] App icons generated (all densities)
+- [ ] Signing config in `build.gradle` loads from `key.properties`
+- [ ] ProGuard/R8 rules cover Flutter, Firebase, and any reflection-based libraries
+- [ ] App icons generated (all densities: mdpi through xxxhdpi)
 - [ ] AAB builds successfully with `flutter build appbundle --release`
-- [ ] Tested on physical device
-- [ ] Data safety section complete in Play Console
+- [ ] Tested release build on **physical device** (R8 can break things not caught in debug)
+- [ ] Data safety section complete and accurate in Play Console
 - [ ] Privacy policy URL configured
 - [ ] Content rating questionnaire complete
 - [ ] Store listing metadata and screenshots uploaded
-- [ ] Target SDK meets Play Store requirements (35+)
+- [ ] Target SDK meets Play Store requirements (35+ as of August 2025)
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| "Failed to sign APK" | Verify `key.properties` paths and passwords; test keystore with `keytool -list -v` |
-| "App not properly signed" | `flutter clean && flutter build appbundle --release`; check signingConfig |
-| R8 minification errors | Add `-keep` rules to `proguard-rules.pro`; temporarily set `minifyEnabled false` |
-| "Duplicate class found" | Exclude conflicting transitive dependencies in `build.gradle` |
-| "Version code already used" | Increment `+N` in `pubspec.yaml` version |
-| Policy violation | Review email; fix data safety, privacy policy, or content rating |
-| "Cannot rollout — no upgrade path" | Ensure new versionCode > previous; check targetSdk requirements |
+| Problem | Why It Happens | Fix |
+|---------|---------------|-----|
+| "Failed to sign APK" | `key.properties` has wrong path or password | Verify with `keytool -list -v -keystore your.jks` |
+| "App not properly signed" | Stale build artifacts with old signing config | `flutter clean && flutter build appbundle --release` |
+| R8 crashes in release only | R8 removed a class accessed via reflection | Add `-keep` rule to `proguard-rules.pro`; temporarily `minifyEnabled false` to confirm |
+| "Duplicate class found" | Two dependencies include the same library | Exclude transitive dep in `build.gradle`: `exclude group: 'com.example'` |
+| "Version code already used" | Build number wasn't incremented | Increment `+N` in `pubspec.yaml` version |
+| "Cannot rollout — no upgrade path" | New versionCode ≤ previous | Ensure new versionCode > all previous uploads across all tracks |
+| Policy violation | Data safety, privacy policy, or content issues | Read email carefully — Google specifies exactly which policy and section |

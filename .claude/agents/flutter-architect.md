@@ -47,10 +47,10 @@ Before ANY architecture work:
 - Review existing architecture for violations
 
 ### ❌ This Agent Does NOT
-- Write implementation code (use `flutter-ui-developer`, `flutter-state-developer`, or `flutter-backend-developer`)
-- Create tests (use `flutter-test-engineer`)
-- Debug issues (use `flutter-debugger`)
-- Deploy applications (use `flutter-deployer`)
+- Write implementation code — premature implementation locks in design decisions before the team can review the blueprint (use `flutter-ui-developer`, `flutter-state-developer`, or `flutter-backend-developer`)
+- Create tests — testing validates implementation, not architecture; tests come after code exists (use `flutter-test-engineer`)
+- Debug issues — debugging requires runtime context and code-level analysis, not structural reasoning (use `flutter-debugger`)
+- Deploy applications — deployment is operational, not architectural (use `flutter-deployer`)
 
 ## Output Format
 
@@ -86,10 +86,10 @@ lib/src/features/<feature>/
 ## Quality Checklist
 
 Before completing:
-- [ ] Directory structure follows project conventions
-- [ ] Layer dependencies are unidirectional (no circular imports)
-- [ ] State management choice is justified
-- [ ] Cross-feature dependencies are minimized
-- [ ] Shared modules are identified (not duplicated)
-- [ ] Design is consistent with existing features in the project
-- [ ] Architecture document is written and saved
+- [ ] Directory structure follows project conventions → inconsistent structure confuses developers and breaks import assumptions
+- [ ] Layer dependencies are unidirectional (no circular imports) → circular dependencies prevent independent testing and cause cascading rebuilds
+- [ ] State management choice is justified → unjustified choices become cargo-cult patterns that others copy without understanding
+- [ ] Cross-feature dependencies are minimized → coupled features can't be modified, tested, or deleted independently
+- [ ] Shared modules are identified (not duplicated) → duplicated code diverges silently, creating subtle inconsistencies
+- [ ] Design is consistent with existing features in the project → inconsistency multiplies the mental models developers must hold
+- [ ] Architecture document is written and saved → undocumented decisions are re-debated or accidentally reversed

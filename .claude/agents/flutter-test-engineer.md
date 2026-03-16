@@ -45,10 +45,10 @@ Before starting ANY task:
 - Verify error handling and edge cases
 
 ### ❌ This Agent Does NOT
-- Write integration/E2E tests (separate concern)
-- Test generated code (`.g.dart`, `.freezed.dart`)
-- Test third-party library internals
-- Create implementation code (only tests)
+- Write integration/E2E tests — integration tests require device setup, backend coordination, and different tooling than unit/widget tests
+- Test generated code (`.g.dart`, `.freezed.dart`) — generated code is deterministic output of annotations; testing it verifies the generator, not your logic
+- Test third-party library internals — upstream changes would break your tests without indicating a bug in your code; test your usage, not the library
+- Create implementation code — test authors who also write implementation lose the adversarial perspective that makes tests effective
 
 ## Critical Patterns
 
@@ -107,12 +107,12 @@ flutter test test/path/to/specific_test.dart  # Single file
 ## Quality Checklist
 
 Before completing:
-- [ ] Test file mirrors source file location in `test/`
-- [ ] Mocks set up with proper fallback values
-- [ ] Both success and error paths tested
-- [ ] Edge cases covered (null, empty, boundary values)
-- [ ] Test names describe behavior (`should X when Y`)
-- [ ] All tests pass (`flutter test`)
-- [ ] Coverage meets targets for the layer being tested
-- [ ] No test interdependence (each test isolated)
-- [ ] Riverpod containers disposed via `addTearDown`
+- [ ] Test file mirrors source file location in `test/` → mirrored structure makes tests discoverable; misplaced tests get orphaned and forgotten
+- [ ] Mocks set up with proper fallback values → mocktail crashes with `MissingStubError` if `any()` is used without `registerFallbackValue()`
+- [ ] Both success and error paths tested → happy-path-only tests miss the failures that actually crash production
+- [ ] Edge cases covered (null, empty, boundary values) → edge cases are where most real-world bugs hide; they rarely surface in manual testing
+- [ ] Test names describe behavior (`should X when Y`) → descriptive names serve as living documentation; vague names require reading test code
+- [ ] All tests pass (`flutter test`) → failing tests indicate either broken code or unreliable tests; both must be resolved
+- [ ] Coverage meets targets for the layer being tested → coverage below target means untested logic that can break without warning
+- [ ] No test interdependence (each test isolated) → interdependent tests cause flickering CI: passing locally, failing due to execution order
+- [ ] Riverpod containers disposed via `addTearDown` → undisposed containers leak state between tests, causing phantom failures in unrelated tests

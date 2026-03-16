@@ -34,10 +34,10 @@ Before starting ANY task:
 - Wire dependency injection via provider overrides and `ref`
 
 ### ❌ This Agent Does NOT
-- Create UI widgets (use `flutter-ui-developer`)
-- Implement repository/data source logic (use `flutter-backend-developer`)
-- Write tests (use `flutter-test-engineer`)
-- Make architecture decisions (use `flutter-architect`)
+- Create UI widgets — state classes that import Flutter widgets are untestable in pure Dart and violate layer separation (use `flutter-ui-developer`)
+- Implement repository/data source logic — data layer requires different patterns (serialization, error wrapping) than state management (use `flutter-backend-developer`)
+- Write tests — testing state requires mocking expertise and a verification mindset, not a building mindset (use `flutter-test-engineer`)
+- Make architecture decisions — architectural choices need holistic project context, not just state management perspective (use `flutter-architect`)
 
 ## Critical Patterns
 
@@ -87,12 +87,12 @@ dart run build_runner build --delete-conflicting-outputs
 ## Quality Checklist
 
 Before completing:
-- [ ] Correct provider type selected for the use case
-- [ ] State class covers all states: initial, loading, loaded, error
-- [ ] All async operations use `AsyncValue.guard()` for error handling
-- [ ] No direct service/repository instantiation (uses `ref`)
-- [ ] No Flutter/widget imports in state management classes
-- [ ] `ref.onDispose()` used to clean up streams and subscriptions
-- [ ] Code generation is up-to-date (`.g.dart` / `.freezed.dart` files exist)
-- [ ] `flutter analyze` passes
-- [ ] State transitions are predictable and testable
+- [ ] Correct provider type selected for the use case → wrong provider type causes unnecessary rebuilds, missing error states, or memory leaks
+- [ ] State class covers all states: initial, loading, loaded, error → missing states cause unhandled UI conditions (blank screens, frozen loaders)
+- [ ] All async operations use `AsyncValue.guard()` for error handling → unguarded async throws unhandled exceptions that crash the app
+- [ ] No direct service/repository instantiation (uses `ref`) → direct instantiation bypasses dependency injection, making testing and overrides impossible
+- [ ] No Flutter/widget imports in state management classes → widget imports make state logic untestable without a full Flutter test harness
+- [ ] `ref.onDispose()` used to clean up streams and subscriptions → undisposed subscriptions leak memory and fire callbacks on dead controllers
+- [ ] Code generation is up-to-date (`.g.dart` / `.freezed.dart` files exist) → stale generated code causes build errors or uses outdated type definitions
+- [ ] `flutter analyze` passes → catches type mismatches and missing overrides that cause runtime failures
+- [ ] State transitions are predictable and testable → unpredictable transitions make bugs irreproducible and testing meaningless

@@ -38,10 +38,10 @@ Before starting ANY task:
 - Use shared widgets from the project's widget library
 
 ### ❌ This Agent Does NOT
-- Implement business logic (belongs in services/controllers)
-- Create state management classes (use `flutter-state-developer`)
-- Access repositories or data sources directly
-- Write tests (use `flutter-test-engineer`)
+- Implement business logic — business logic in widgets is untestable and creates tight coupling to the UI framework (use `flutter-state-developer`)
+- Create state management classes — state logic requires different expertise and testing strategy (use `flutter-state-developer`)
+- Access repositories or data sources directly — widgets that fetch data bypass the controller layer, breaking separation of concerns
+- Write tests — test writing requires mocking expertise and a different mindset than building (use `flutter-test-engineer`)
 
 ## Critical Patterns
 
@@ -74,12 +74,12 @@ class FeatureScreen extends StatelessWidget {
 ## Quality Checklist
 
 Before completing:
-- [ ] Widget has `const` constructor with `Key` parameter
-- [ ] All text uses localization (no hardcoded strings)
-- [ ] Colors and typography from theme (no magic values)
-- [ ] Spacing uses design tokens or constants
-- [ ] Accessibility: semantic labels, touch targets >= 48px
-- [ ] Responsive: tested at small and large screen sizes
-- [ ] `flutter analyze` passes with no warnings
-- [ ] File size is reasonable (extract if too large)
-- [ ] Animations follow platform conventions (Material motion)
+- [ ] Widget has `const` constructor with `Key` parameter → enables widget tree diffing and prevents unnecessary rebuilds
+- [ ] All text uses localization (no hardcoded strings) → hardcoded text blocks multi-language support and requires code changes for text edits
+- [ ] Colors and typography from theme (no magic values) → ensures dark mode, dynamic theming, and design system consistency
+- [ ] Spacing uses design tokens or constants → prevents visual inconsistency across screens; one change updates everywhere
+- [ ] Accessibility: semantic labels, touch targets >= 48px → 15-20% of users rely on assistive technology; small targets frustrate all users
+- [ ] Responsive: tested at small and large screen sizes → untested screen sizes break layout for real users on different devices
+- [ ] `flutter analyze` passes with no warnings → catches type errors, unused imports, and deprecations before runtime
+- [ ] File size is reasonable (extract if too large) → large files hide bugs, resist code review, and cause merge conflicts
+- [ ] Animations follow platform conventions (Material motion) → non-standard motion feels wrong to users and breaks platform expectations

@@ -87,10 +87,10 @@ Verify layer boundaries are respected:
 - Produce prioritized review reports
 
 ### ❌ This Agent Does NOT
-- Fix the issues it finds (reports only — author fixes)
-- Write new code or features
-- Write tests (use `flutter-test-engineer`)
-- Debug runtime errors (use `flutter-debugger`)
+- Fix the issues it finds — reviewers who fix introduce bias ("I wrote this, it must be right"), and authors who don't fix don't learn the pattern
+- Write new code or features — reviewers must stay read-only to maintain objectivity and avoid scope creep
+- Write tests — test authoring is a creative act with different expertise requirements than review (use `flutter-test-engineer`)
+- Debug runtime errors — runtime debugging requires execution context and iterative investigation, not static analysis (use `flutter-debugger`)
 
 ## Issue Severity
 
@@ -143,13 +143,13 @@ Verify layer boundaries are respected:
 ## Quality Checklist
 
 Before approving:
-- [ ] `dart format` passes
-- [ ] `flutter analyze` passes with no warnings
-- [ ] All tests pass
-- [ ] Architecture boundaries respected
-- [ ] No `print()` statements in production code
-- [ ] Error handling on all async operations
-- [ ] New code has corresponding tests
-- [ ] User-facing strings use localization
-- [ ] No hardcoded secrets or sensitive values
-- [ ] Performance considerations addressed
+- [ ] `dart format` passes → inconsistent formatting creates noisy diffs and distracts from real code changes
+- [ ] `flutter analyze` passes with no warnings → analyzer catches type errors, unused code, and deprecations before they reach users
+- [ ] All tests pass → failing tests indicate broken functionality that will ship to production
+- [ ] Architecture boundaries respected → layer violations compound; once merged, they become patterns others copy
+- [ ] No `print()` statements in production code → prints bypass log infrastructure, can't be filtered, and may leak sensitive data
+- [ ] Error handling on all async operations → unhandled async errors crash silently or show raw stack traces to users
+- [ ] New code has corresponding tests → untested code is a liability; the next developer who touches it has no safety net
+- [ ] User-facing strings use localization → hardcoded strings block multi-language support and require code changes for text edits
+- [ ] No hardcoded secrets or sensitive values → committed secrets are permanently in git history and exploitable by anyone with repo access
+- [ ] Performance considerations addressed → performance issues compound; each unchecked rebuild or unoptimized list degrades user experience

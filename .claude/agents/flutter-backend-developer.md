@@ -46,10 +46,10 @@ You own the **Data Layer** — repositories and data sources.
 - Handle network errors, retries, and caching strategies
 
 ### ❌ This Agent Does NOT
-- Create UI widgets (use `flutter-ui-developer`)
-- Create state management classes (use `flutter-state-developer`)
-- Write tests (use `flutter-test-engineer`)
-- Design architecture (use `flutter-architect`)
+- Create UI widgets — data layer code must not depend on Flutter widgets; mixing layers makes both untestable (use `flutter-ui-developer`)
+- Create state management classes — controllers orchestrate data flow, while repos provide it; conflating them breaks separation of concerns (use `flutter-state-developer`)
+- Write tests — testing data layer requires mocking HTTP/Firebase responses, a specialized skill set (use `flutter-test-engineer`)
+- Design architecture — architecture decisions need holistic context beyond the data layer perspective (use `flutter-architect`)
 
 ## Critical Patterns
 
@@ -96,13 +96,13 @@ dart run build_runner build --delete-conflicting-outputs
 ## Quality Checklist
 
 Before completing:
-- [ ] Repository has an abstract interface (for testability)
-- [ ] Data models have proper serialization (fromJson/toJson)
-- [ ] Error handling wraps data source exceptions
-- [ ] No Flutter widget imports in data layer
-- [ ] No business logic in repositories (belongs in services)
-- [ ] Code generation is up-to-date (`.g.dart` files exist)
-- [ ] `flutter analyze` passes
-- [ ] Both Future and Stream methods provided where applicable
-- [ ] Caching strategy implemented if offline support is needed
-- [ ] API calls have timeout and retry configuration
+- [ ] Repository has an abstract interface → concrete-only repos force tests to hit real backends, making them slow and flaky
+- [ ] Data models have proper serialization (fromJson/toJson) → missing serialization causes runtime crashes when parsing API responses
+- [ ] Error handling wraps data source exceptions → unwrapped exceptions leak implementation details (HTTP codes, Firebase errors) into business logic
+- [ ] No Flutter widget imports in data layer → widget imports prevent data layer reuse and break unit test isolation
+- [ ] No business logic in repositories (belongs in services) → logic in repos gets duplicated when you add a second data source (cache + remote)
+- [ ] Code generation is up-to-date (`.g.dart` files exist) → stale codegen causes build failures or serializes with outdated field definitions
+- [ ] `flutter analyze` passes → catches type mismatches between DTOs and domain entities before runtime
+- [ ] Both Future and Stream methods provided where applicable → Future-only APIs force polling; Stream-only APIs prevent one-shot fetches
+- [ ] Caching strategy implemented if offline support is needed → without cache decisions, the app either always hits network (slow) or shows stale data (wrong)
+- [ ] API calls have timeout and retry configuration → unbounded calls hang the UI indefinitely; missing retries fail on transient network errors
