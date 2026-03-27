@@ -80,38 +80,53 @@ final cacheManager = CacheManager(Config(
 **When needed:** Frequent heavy operations (real-time data processing, continuous JSON parsing).
 
 ```dart
+import 'dart:async';
 import 'dart:isolate';
 
-class WorkerIsolate {
-  late final SendPort _sendPort;
-  final _responses = <int, Completer<dynamic>>{};
-  int _nextId = 0;
+/// Long-lived worker for repeated heavy operations of the same type.
+/// Use instead of compute() when the same operation runs frequently.
+///
+/// Usage:
+///   final worker = await ReusableWorker.spawn(expensiveTransform);
+///   final result = await worker.run(inputData);
+///   worker.dispose(); // When done
+class ReusableWorker<T, R> {
+  final Isolate _isolate;
+  final SendPort _commandPort;
 
-  static Future<WorkerIsolate> spawn() async {
-    final worker = WorkerIsolate._();
-    final receivePort = ReceivePort();
-    await Isolate.spawn(_isolateEntry, receivePort.sendPort);
-    worker._sendPort = await receivePort.first as SendPort;
-    return worker;
+  ReusableWorker._(this._isolate, this._commandPort);
+
+  /// [function] must be a top-level or static function.
+  static Future<ReusableWorker<T, R>> spawn<T, R>(
+    R Function(T) function,
+  ) async {
+    final initPort = ReceivePort();
+    final isolate = await Isolate.spawn(
+      _entry<T, R>,
+      (initPort.sendPort, function),
+    );
+    // First message from isolate is its command SendPort
+    final commandPort = await initPort.first as SendPort;
+    return ReusableWorker._(isolate, commandPort);
   }
 
-  WorkerIsolate._();
-
-  Future<R> execute<T, R>(R Function(T) fn, T arg) {
-    final id = _nextId++;
-    final completer = Completer<R>();
-    _responses[id] = completer;
-    _sendPort.send(_WorkerMessage(id, fn, arg));
-    return completer.future;
+  /// Send work to the isolate and await the result.
+  Future<R> run(T input) async {
+    final responsePort = ReceivePort();
+    _commandPort.send((input, responsePort.sendPort));
+    return await responsePort.first as R;
   }
 
-  static void _isolateEntry(SendPort mainPort) {
-    final port = ReceivePort();
-    mainPort.send(port.sendPort);
-    port.listen((message) {
-      final msg = message as _WorkerMessage;
-      final result = msg.fn(msg.arg);
-      mainPort.send(_WorkerResponse(msg.id, result));
+  void dispose() => _isolate.kill(priority: Isolate.beforeNextEvent);
+
+  static void _entry<T, R>((SendPort, R Function(T)) init) {
+    final (initPort, function) = init;
+    final commandPort = ReceivePort();
+    initPort.send(commandPort.sendPort);
+
+    commandPort.listen((message) {
+      final (T input, SendPort replyPort) = message;
+      replyPort.send(function(input));
     });
   }
 }

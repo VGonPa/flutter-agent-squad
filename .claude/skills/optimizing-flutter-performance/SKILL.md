@@ -383,3 +383,4 @@ developer.Timeline.finishSync();
 | Slow images | Full-resolution decode | 48MB per 4K image in GPU memory | `cacheWidth`/`cacheHeight` |
 | Choppy animations | Repaints crossing boundaries | Entire layer repainted | `RepaintBoundary` (profile first) |
 | UI freezes | Computation on UI thread | Single-threaded Dart | `compute()` for >50ms work |
+| Slow startup | Too much init work | Blocking main before first frame | Lazy-load, defer non-critical init |
