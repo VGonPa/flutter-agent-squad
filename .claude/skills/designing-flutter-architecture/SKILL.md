@@ -90,7 +90,6 @@ Presentation → Domain ← Data
 |-----------|-------------------|-----|
 | Domain imports Data or Presentation | Business logic coupled to implementation details | Define interfaces in Domain, implement in Data |
 | Presentation imports Data directly | Bypasses the abstraction boundary | Go through Domain (use case or repository interface) |
-| Widget calls API directly | Untestable, no separation of concerns | Widget -> Controller -> UseCase/Repo |
 
 ## Step 3: Know Where Code Belongs
 
@@ -216,6 +215,20 @@ See [REFERENCE.md](REFERENCE.md) for DTO and entity implementation templates.
 | Feature A imports Feature B's data layer | Tight coupling, cannot evolve independently | Extract shared code to `core/` |
 | Entity has `toJson()` | Domain knows about serialization | Use separate DTO in Data layer (if warranted by Step 6) |
 | Use case just calls repository method | Pass-through abstraction adding no value | Delete use case, call repository directly from controller |
+
+**The most common violation — business logic in widgets:**
+
+```dart
+// ❌ BAD: Business logic in widget — untestable, no reuse
+onPressed: () async {
+  if (email.contains('@') && password.length >= 8) {
+    final user = await apiClient.post('/login', ...);
+  }
+}
+
+// ✅ GOOD: Widget delegates to controller
+onPressed: () => controller.login(email, password),
+```
 
 ## Quick Checklist (New Feature)
 

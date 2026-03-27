@@ -2,7 +2,7 @@
 
 Implementation templates for architectural patterns described in [SKILL.md](SKILL.md). Every template here corresponds to a decision made in SKILL.md — don't implement without reading the decision context first.
 
-**Error handling pattern:** These templates use exceptions (Option B from [SKILL.md](SKILL.md) Step 5) by default. The Use Case example shows Either (Option A) to demonstrate the translation boundary. For a fully Either-based codebase, repository interfaces would also return `Either<Failure, T>`.
+**Error handling pattern:** These templates use exceptions (Option B from [SKILL.md](SKILL.md) Step 5) consistently. For Either-based alternatives (Option A), see [SKILL.md](SKILL.md) Step 5.
 
 ## Domain Layer: Entity
 
@@ -41,49 +41,38 @@ abstract class UserRepository {
 ## Domain Layer: Use Case (Only When Logic Exists)
 
 **When needed:** When there is actual business logic to encapsulate — validation, orchestration of multiple repositories, or transformation rules.
-**When NOT needed:** If the use case would just delegate to the repository with zero logic, skip it (see SKILL.md "When This Architecture Is Overkill").
+**When NOT needed:** If the use case would just delegate to the repository with zero logic, skip it (see [SKILL.md](SKILL.md) "When This Architecture Is Overkill").
 
 ```dart
-// domain/use_cases/update_profile.dart
 // EXISTS because it validates + orchestrates (not a pass-through)
-// Shows Either (Option A) — translates exceptions from repo into typed failures
 class UpdateProfileUseCase {
   final UserRepository _userRepo;
   final ImageRepository _imageRepo;
   UpdateProfileUseCase(this._userRepo, this._imageRepo);
-  Future<Either<Failure, User>> call(UpdateProfileParams p) async {
-    if (p.displayName.length < 2) return Left(ValidationFailure('Too short'));
-    try {
-      if (p.newAvatar != null) await _imageRepo.upload(p.newAvatar!);
-      final user = p.toUser();
-      await _userRepo.updateProfile(user);
-      return Right(user);
-    } on Failure catch (e) {
-      return Left(e);
-    }
+  Future<void> call(UpdateProfileParams p) async {
+    if (p.displayName.length < 2) throw ValidationFailure('Too short');
+    if (p.newAvatar != null) await _imageRepo.upload(p.newAvatar!);
+    await _userRepo.updateProfile(p.toUser());
   }
 }
 ```
 
 ## Data Layer: DTO (When Separation Is Warranted)
 
-**When needed:** See SKILL.md Step 6 decision table. Use when API shape differs from domain shape, or when multiple data sources serialize differently.
+**When needed:** See [SKILL.md](SKILL.md) Step 6 decision table. Use when API shape differs from domain shape, or when multiple data sources serialize differently.
 
 ```dart
-// data/models/user_dto.dart — JSON awareness stays in Data layer
 class UserDto {
   final String id;
   final String email;
   final String displayName;
   final DateTime createdAt;
   UserDto.fromJson(Map<String, dynamic> j)
-      : id = j['id'] as String,
-        email = j['email'] as String,
+      : id = j['id'] as String, email = j['email'] as String,
         displayName = j['display_name'] as String,
         createdAt = DateTime.parse(j['created_at'] as String);
-  // DTO → Entity mapping lives HERE, not in the entity
-  User toEntity() => User(
-      id: id, email: email, displayName: displayName, createdAt: createdAt);
+  User toEntity() => User(id: id, email: email,
+      displayName: displayName, createdAt: createdAt);
 }
 ```
 
@@ -109,7 +98,7 @@ class UserRepositoryImpl implements UserRepository {
 ## Presentation Layer: Controller / Notifier
 
 **When needed:** Every screen that manages state beyond simple stateless display.
-**Note:** This example uses Riverpod, but the pattern applies to any state management.
+**Note:** This example uses Riverpod `StateNotifier` (works in 2.x). For Riverpod 3.x+, replace with `Notifier`/`AsyncNotifier` — same pattern, updated API. The layer placement principle applies to any state management.
 
 ```dart
 // presentation/controllers/profile_controller.dart
