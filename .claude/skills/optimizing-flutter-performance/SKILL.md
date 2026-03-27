@@ -131,7 +131,7 @@ RepaintBoundary(
 
 **Good candidates:** Animations, scrolling content, video players, custom painters that update frequently.
 
-**Trade-off:** Each `RepaintBoundary` allocates a separate GPU layer. Layers consume GPU memory (~1-4MB each depending on size). Too many boundaries = GPU memory pressure and compositing overhead. **Profile with `debugRepaintRainbowEnabled = true`** to see which areas actually repaint before adding boundaries.
+**Trade-off:** Each `RepaintBoundary` allocates a separate GPU layer. Layer memory is proportional to pixel area (~4 bytes/pixel in RGBA — a full-screen 1080×1920 boundary ≈ 8MB). Too many boundaries = GPU memory pressure and compositing overhead. **Profile with `debugRepaintRainbowEnabled = true`** to see which areas actually repaint before adding boundaries.
 
 **Rule:** Don't add `RepaintBoundary` speculatively. Only add when DevTools shows a specific repaint problem.
 
@@ -239,7 +239,7 @@ void processData() async {
 static List<Item> expensiveTransform(List<Item> input) { ... }
 ```
 
-**Trade-off:** `compute()` has ~2-5ms overhead for isolate spawn + message serialization. For operations under 16ms, the overhead makes it slower than running on the UI thread. **Rule of thumb:** only use `compute()` for operations that take >50ms.
+**Trade-off:** `compute()` has ~2-5ms overhead for isolate spawn + message serialization (varies by device — low-end Android can be 10ms+). For operations under 16ms, the overhead makes it slower than running on the UI thread. **Rule of thumb:** only use `compute()` for operations that take >50ms.
 
 **For frequent heavy work:** Spawn a long-lived isolate with `Isolate.spawn` instead of paying the spawn cost every time. See [REFERENCE.md -> Long-Lived Isolates](REFERENCE.md#long-lived-isolates).
 
@@ -327,7 +327,7 @@ PaintingBinding.instance.imageCache.maximumSizeBytes = 50 << 20; // 50MB
 Impeller is Flutter's modern rendering engine replacing Skia:
 
 - **iOS**: Default since Flutter 3.16
-- **Android**: Default since Flutter 3.38
+- **Android**: Default since Flutter 3.22
 - **Key benefit**: Eliminates shader compilation jank (all shaders pre-compiled at build time)
 
 **Impact on profiling:** If you see first-frame jank with Impeller, it's widget building or data loading, not shaders. Focus on the build phase.
