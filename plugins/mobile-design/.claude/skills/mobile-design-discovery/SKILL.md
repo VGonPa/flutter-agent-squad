@@ -1,6 +1,6 @@
 ---
 name: mobile-design-discovery
-description: Interactive design discovery session that extracts what the user actually wants before any code is written. Use when starting a new screen, redesigning an existing one, or when the user describes a feature but hasn't defined the visual/UX direction. Also trigger when the user says things like "I need a screen for...", "design a page", "what should this look like", "help me think through the UI", or describes functionality without specifying design. This skill MUST run before mobile-visual-design or flutter-ui-craft to prevent building the wrong thing beautifully.
+description: "Design discovery session for mobile screens. Use when: starting a new screen, redesigning UI, user says 'I need a screen for...', 'design a page', 'what should this look like', 'help me think through the UI', or describes functionality without specifying design. MUST run before mobile-visual-design or flutter-ui-craft. Extracts JTBD, context, taste, hierarchy, and constraints through interactive conversation before any code is written."
 user-invocable: true
 ---
 
@@ -17,6 +17,19 @@ You are the designer who sits down with the user and asks the right questions be
 > - Creating a dense desktop layout for a phone held one-handed on the subway
 > - Picking a playful aesthetic for a medical app (or a clinical one for a game)
 > - Spending hours on a screen before realizing the brand already has a design system
+
+## When NOT to Use This Skill
+
+Skip discovery and go straight to design/implementation when:
+
+- **User has a detailed design spec** — mockups, wireframes, or a Figma link already define the visual direction. Discovery would re-ask questions they've already answered.
+- **Minor tweaks to existing screens** — changing a color, moving a button, fixing spacing. The design direction already exists; just execute.
+- **Exact clone request** — "Make it look exactly like [screenshot/app]." There's nothing to discover — the reference IS the brief.
+- **Technical-only changes** — refactoring a widget tree, fixing a build error, performance optimization. No design decisions involved.
+
+**Grey zone — use abbreviated discovery:** When the user has *some* direction but not all (e.g., "I want a settings screen, dark theme, Material 3"), run a shortened session focusing only on the gaps (hierarchy, content, emotional state) rather than all six phases.
+
+---
 
 ## How This Session Works
 
@@ -298,11 +311,15 @@ Present it to the user for confirmation before moving on.
   motion appetite, complexity tolerance, etc.]
 ```
 
-### What Happens Next
+### Handoff Protocol
 
-After the user confirms the brief, they can proceed to:
-- **mobile-visual-design** — to develop the visual language (colors, typography, spacing)
-- **flutter-ui-craft** — to generate implementation-ready Flutter code
-- **mobile-ux-patterns** — to explore interaction patterns for specific components
+After the user confirms the brief:
 
-The brief gives these downstream skills the context to make good decisions without re-asking the same questions.
+1. **Save the brief** to `zz-support-files/docs/design-briefs/[screen-name]-brief.md` so downstream skills can reference it
+2. **Present next steps** — ask the user which skill to invoke next:
+   - **mobile-visual-design** — to develop the visual language (colors, typography, spacing)
+   - **flutter-ui-craft** — to generate implementation-ready Flutter code
+   - **mobile-ux-patterns** — to explore interaction patterns for specific components
+3. **Pass context** — when invoking the next skill, reference the saved brief path so it can read the full discovery output
+
+The brief gives downstream skills the context to make good decisions without re-asking the same questions.
