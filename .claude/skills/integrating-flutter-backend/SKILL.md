@@ -18,9 +18,9 @@ Decision guide for connecting Flutter apps to backend services. Focuses on WHEN 
 
 ## When NOT to Use This Skill
 
-- **State management** (Riverpod, Bloc, Provider) — see `managing-flutter-state` skill
+- **State management** (Riverpod, Bloc, Provider) — see `implementing-riverpod` skill
 - **UI patterns** (widgets, layouts, navigation, theming) — see Flutter UI skills
-- **Testing** (unit, widget, integration tests) — see `testing-flutter-apps` skill
+- **Testing** (unit, widget, integration tests) — see `testing-flutter` skill
 - **Deployment** (CI/CD, app store, Firebase Hosting) — see deployment-specific skills
 
 ## Backend Technology Decision
