@@ -218,6 +218,8 @@ See [REFERENCE.md → ThemeExtension Full Template](REFERENCE.md#themeextension-
 
 ### Breakpoint Pattern
 
+**Breakpoint values:** 600/1200 are simplified from Material Design 3 window size classes (Compact <600, Medium 600–840, Expanded >840, Large >1200).
+
 ```dart
 class ResponsiveLayout extends StatelessWidget {
   const ResponsiveLayout({super.key, required this.mobile, this.tablet, this.desktop});
@@ -243,6 +245,7 @@ See [REFERENCE.md → Responsive Layout Template](REFERENCE.md#responsive-layout
 
 ```dart
 GridView.builder(
+  itemCount: items.length,
   gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
     maxCrossAxisExtent: 300, // Flutter calculates columns
     mainAxisSpacing: 16,
