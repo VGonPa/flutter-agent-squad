@@ -74,6 +74,9 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// Creates a complete TextTheme from a heading + body font pairing.
 ///
+/// Uses GoogleFonts.getFont() for dynamic family selection — works with any
+/// Google Font name as a string (no need for named methods like .latoTextTheme()).
+///
 /// Personality pairings (see SKILL.md Section 2):
 ///   Editorial:   heading: 'Playfair Display', body: 'Source Sans 3'
 ///   Tech:        heading: 'Space Grotesk',    body: 'Inter'
@@ -84,25 +87,22 @@ TextTheme buildTextTheme({
   required String headingFamily,
   required String bodyFamily,
 }) {
-  final heading = GoogleFonts.getTextTheme(headingFamily);
-  final body = GoogleFonts.getTextTheme(bodyFamily);
-
   return TextTheme(
     // Display
-    displayLarge:  heading.displayLarge!.copyWith(fontSize: 34, fontWeight: FontWeight.w700, height: 1.1),
-    displayMedium: heading.displayMedium!.copyWith(fontSize: 28, fontWeight: FontWeight.w700, height: 1.15),
+    displayLarge:  GoogleFonts.getFont(headingFamily, fontSize: 34, fontWeight: FontWeight.w700, height: 1.1),
+    displayMedium: GoogleFonts.getFont(headingFamily, fontSize: 28, fontWeight: FontWeight.w700, height: 1.15),
 
     // Headings
-    headlineLarge:  heading.headlineLarge!.copyWith(fontSize: 22, fontWeight: FontWeight.w600, height: 1.2),
-    headlineMedium: heading.headlineMedium!.copyWith(fontSize: 18, fontWeight: FontWeight.w500, height: 1.25),
+    headlineLarge:  GoogleFonts.getFont(headingFamily, fontSize: 22, fontWeight: FontWeight.w600, height: 1.2),
+    headlineMedium: GoogleFonts.getFont(headingFamily, fontSize: 18, fontWeight: FontWeight.w500, height: 1.25),
 
     // Body
-    bodyLarge:  body.bodyLarge!.copyWith(fontSize: 16, fontWeight: FontWeight.w400, height: 1.5),
-    bodyMedium: body.bodyMedium!.copyWith(fontSize: 14, fontWeight: FontWeight.w400, height: 1.4),
+    bodyLarge:  GoogleFonts.getFont(bodyFamily, fontSize: 16, fontWeight: FontWeight.w400, height: 1.5),
+    bodyMedium: GoogleFonts.getFont(bodyFamily, fontSize: 14, fontWeight: FontWeight.w400, height: 1.4),
 
     // Caption / Overline
-    bodySmall:    body.bodySmall!.copyWith(fontSize: 12, fontWeight: FontWeight.w400, height: 1.4),
-    labelSmall:   body.labelSmall!.copyWith(fontSize: 11, fontWeight: FontWeight.w500, height: 1.5, letterSpacing: 1.2),
+    bodySmall:    GoogleFonts.getFont(bodyFamily, fontSize: 12, fontWeight: FontWeight.w400, height: 1.4),
+    labelSmall:   GoogleFonts.getFont(bodyFamily, fontSize: 11, fontWeight: FontWeight.w500, height: 1.5, letterSpacing: 1.2),
   );
 }
 ```
@@ -393,8 +393,8 @@ Color elevatedSurface(BuildContext context, int level) {
   )!;
 }
 
-// Usage: surface for a level-2 card in dark mode
-Container(color: elevatedSurface(context, 2)) // → #1E1E1E area
+// Usage: surface for a level-1 card in dark mode
+Container(color: elevatedSurface(context, 1)) // → #1E1E1E area
 ```
 
 ---
@@ -419,24 +419,27 @@ abstract class AppDuration {
 ```dart
 abstract class AppSpring {
   /// Snappy — toggles, checkboxes, small interactions
+  /// ζ = damping / (2 × √(stiffness × mass)) = 34 / (2 × 20) = 0.85
   static const SpringDescription snappy = SpringDescription(
     mass: 1.0,
     stiffness: 400,
-    damping: 22, // damping ratio ≈ 0.85
+    damping: 34, // damping ratio ≈ 0.85
   );
 
   /// Standard — card transitions, tab switches
+  /// ζ = 28 / (2 × √300) = 28 / 34.64 ≈ 0.81
   static const SpringDescription standard = SpringDescription(
     mass: 1.0,
     stiffness: 300,
-    damping: 20, // damping ratio ≈ 0.80
+    damping: 28, // damping ratio ≈ 0.80
   );
 
   /// Bouncy — sheet reveals, celebrations, playful elements
+  /// ζ = 24 / (2 × √300) = 24 / 34.64 ≈ 0.69
   static const SpringDescription bouncy = SpringDescription(
     mass: 1.0,
     stiffness: 300,
-    damping: 18, // damping ratio ≈ 0.70
+    damping: 24, // damping ratio ≈ 0.70
   );
 }
 
@@ -469,41 +472,65 @@ abstract class AppCurves {
 ### Staggered List Animation Helper
 
 ```dart
-/// Animates list items with staggered entrance.
-/// Each item fades in and slides up with a 50ms delay from the previous.
-class StaggeredListAnimation extends StatelessWidget {
-  final int itemCount;
-  final Widget Function(BuildContext, int, Animation<double>) itemBuilder;
+/// Wraps a single list item with a staggered fade-in + slide-up entrance.
+/// Use [index] to compute the delay: each item waits [staggerDelay] × index
+/// before animating in.
+///
+/// Usage:
+///   ListView.builder(
+///     itemCount: items.length,
+///     itemBuilder: (context, index) => StaggeredListItem(
+///       index: index,
+///       child: MyListTile(item: items[index]),
+///     ),
+///   )
+class StaggeredListItem extends StatefulWidget {
+  final int index;
+  final Widget child;
   final Duration staggerDelay;
 
-  const StaggeredListAnimation({
+  const StaggeredListItem({
     super.key,
-    required this.itemCount,
-    required this.itemBuilder,
+    required this.index,
+    required this.child,
     this.staggerDelay = const Duration(milliseconds: 50),
   });
 
   @override
+  State<StaggeredListItem> createState() => _StaggeredListItemState();
+}
+
+class _StaggeredListItemState extends State<StaggeredListItem>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: AppDuration.normal);
+    // Stagger: each item waits (index × delay) before starting
+    Future.delayed(widget.staggerDelay * widget.index, () {
+      if (mounted) _controller.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      itemCount: itemCount,
-      itemBuilder: (context, index) {
-        return TweenAnimationBuilder<double>(
-          tween: Tween(begin: 0.0, end: 1.0),
-          duration: AppDuration.normal,
-          curve: AppCurves.enter,
-          // Delay proportional to index
-          builder: (context, value, child) {
-            return Opacity(
-              opacity: value,
-              child: Transform.translate(
-                offset: Offset(0, 16 * (1 - value)),
-                child: itemBuilder(context, index, AlwaysStoppedAnimation(value)),
-              ),
-            );
-          },
-        );
-      },
+    return FadeTransition(
+      opacity: CurvedAnimation(parent: _controller, curve: AppCurves.enter),
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.1), // 10% of height
+          end: Offset.zero,
+        ).animate(CurvedAnimation(parent: _controller, curve: AppCurves.enter)),
+        child: widget.child,
+      ),
     );
   }
 }
