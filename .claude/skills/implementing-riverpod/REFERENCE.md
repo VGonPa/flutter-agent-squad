@@ -2,6 +2,45 @@
 
 Implementation templates for patterns described in [SKILL.md](SKILL.md). Every template here corresponds to a decision made in SKILL.md — don't implement without reading the decision context first.
 
+## Full Widget Example — watch/read/listen
+
+Complete annotated `ConsumerWidget` showing all three ref methods in context. See [SKILL.md → Step 3](SKILL.md#step-3-consume-providers--watch-read-listen) for the decision rules.
+
+```dart
+class ProductListScreen extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // WATCH: reactive — rebuilds when products change
+    final productsAsync = ref.watch(productsProvider);
+
+    // LISTEN: side effect — shows snackbar, no rebuild
+    ref.listen(cartProvider, (prev, next) {
+      if (next.items.length > (prev?.items.length ?? 0)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Added to cart')),
+        );
+      }
+    });
+
+    return productsAsync.when(
+      data: (products) => ListView.builder(
+        itemCount: products.length,
+        itemBuilder: (_, i) => ProductCard(
+          product: products[i],
+          // READ: one-shot in callback — no subscription needed
+          onAddToCart: () =>
+              ref.read(cartProvider.notifier).add(products[i]),
+        ),
+      ),
+      loading: () => const CircularProgressIndicator(),
+      error: (err, _) => ErrorDisplay(error: err),
+    );
+  }
+}
+```
+
+**WHY this structure:** `watch` in `build()` creates the reactive subscription. `listen` hooks into the same reactive flow but triggers side effects without rebuilding. `read` in the `onAddToCart` callback is a one-shot — no subscription, just the current value at tap time.
+
 ## StreamProvider and Family Patterns
 
 **When needed:** Real-time data from Firestore, WebSocket, or any `Stream` source.

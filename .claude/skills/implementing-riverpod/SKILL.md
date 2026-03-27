@@ -93,7 +93,6 @@ Future<Product> product(Ref ref, String id) async {
 class LoginController extends _$LoginController {
   @override
   FutureOr<bool?> build() => null; // No initial fetch
-
   Future<bool> submit(String email, String password) async {
     state = const AsyncValue.loading();
     state = await AsyncValue.guard(() async {
@@ -141,37 +140,21 @@ These three methods exist because **widgets and callbacks have different lifecyc
 ### Annotated Example
 
 ```dart
-class ProductListScreen extends ConsumerWidget {
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // WATCH: reactive — rebuilds when products change
-    final productsAsync = ref.watch(productsProvider);
-
-    // LISTEN: side effect — shows snackbar, no rebuild
-    ref.listen(cartProvider, (prev, next) {
-      if (next.items.length > (prev?.items.length ?? 0)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Added to cart')),
-        );
-      }
-    });
-
-    return productsAsync.when(
-      data: (products) => ListView.builder(
-        itemCount: products.length,
-        itemBuilder: (_, i) => ProductCard(
-          product: products[i],
-          // READ: one-shot in callback — no subscription needed
-          onAddToCart: () =>
-              ref.read(cartProvider.notifier).add(products[i]),
-        ),
-      ),
-      loading: () => const CircularProgressIndicator(),
-      error: (err, _) => ErrorDisplay(error: err),
-    );
-  }
+Widget build(BuildContext context, WidgetRef ref) {
+  final productsAsync = ref.watch(productsProvider);     // WATCH — reactive
+  ref.listen(cartProvider, (_, next) { /* snackbar */ }); // LISTEN — side effect, no rebuild
+  return productsAsync.when(
+    data: (products) => ProductList(
+      items: products,
+      onAddToCart: (p) => ref.read(cartProvider.notifier).add(p), // READ — one-shot
+    ),
+    loading: () => const CircularProgressIndicator(),
+    error: (err, _) => ErrorDisplay(error: err),
+  );
 }
 ```
+
+See [REFERENCE.md → Full Widget Example](REFERENCE.md#full-widget-example--watchreadlisten) for the complete annotated `ConsumerWidget` with listen side effects.
 
 ### The Three Mistakes That Burn Everyone
 
@@ -286,21 +269,14 @@ You are NOT testing Riverpod's framework — you are testing YOUR logic. Overrid
 
 ```dart
 test('LoginController.submit returns true on success', () async {
-  // 1. Override the dependency, not the provider under test
   final container = ProviderContainer(overrides: [
     authServiceProvider.overrideWithValue(MockAuthService()),
   ]);
   addTearDown(container.dispose);
-
-  // 2. Stub the mock behavior
   when(() => container.read(authServiceProvider).signIn(any(), any()))
       .thenAnswer((_) async {});
-
-  // 3. Exercise the notifier
   final notifier = container.read(loginControllerProvider.notifier);
   final result = await notifier.submit('a@b.com', 'pass');
-
-  // 4. Assert on both return value and state
   expect(result, true);
   expect(container.read(loginControllerProvider).hasError, false);
 });
