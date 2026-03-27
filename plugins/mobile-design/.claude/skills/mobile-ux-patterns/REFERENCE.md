@@ -4,7 +4,7 @@ Lookup tables and specific values for patterns described in [SKILL.md](SKILL.md)
 
 ## Thumb Zone Pixel Ranges
 
-Measured from bottom-left corner of screen. Values are approximate — based on ergonomic studies of typical adult hand grip. Left-handed users mirror horizontally.
+Measured from the bottom edge of screen. Values are approximate — based on ergonomic studies of typical adult hand grip with the device held in one hand. The natural zone is center-biased; left-handed users mirror horizontally.
 
 ### Small Phone (≤5.4", e.g., iPhone SE / mini)
 
@@ -163,7 +163,7 @@ Using the correct keyboard type reduces taps-per-field by surfacing relevant key
 
 | Property | Value | Notes |
 |----------|-------|-------|
-| Corner radius | 12–16dp | Top corners only |
+| Corner radius | 16dp (M2) / 28dp (M3) | Top corners only |
 | Max height | 90% of screen | Leave status bar visible |
 | Drag handle | Centered, 32×4dp, rounded | Visual affordance for dismiss gesture |
 | Peek height (persistent) | ~25% of screen | Shows first action or summary |

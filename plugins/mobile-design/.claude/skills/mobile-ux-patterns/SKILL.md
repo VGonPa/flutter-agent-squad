@@ -47,7 +47,7 @@ These aren't academic theories — they're measurable constraints that predict w
 
 **The principle:** Time to reach a target = f(distance to target / size of target). Smaller or farther targets take longer and produce more errors.
 
-**Mobile implication:** Fingers are imprecise. A mouse cursor is 1px; a fingertip contact patch is ~7mm (40px at 160dpi).
+**Mobile implication:** Fingers are imprecise. A mouse cursor is 1px; a fingertip contact patch is ~7mm (~44px at 160dpi).
 
 **Rules:**
 
@@ -83,9 +83,9 @@ These aren't academic theories — they're measurable constraints that predict w
 
 **Decision:** If you're debating "custom vs platform-standard," ask: "Will the user know what to do without instructions?" If the answer is no, use the platform convention.
 
-### Miller's Law — Chunk Information in Groups of 7±2
+### Miller's Law — Chunk Information into Small Groups
 
-**The principle:** Working memory holds ~7 items. Beyond that, comprehension drops.
+**The principle:** Working memory capacity is limited. Miller's classic 1956 estimate was 7±2 items, but modern research (Cowan, 2001) places effective capacity closer to **4±1 meaningful chunks**. On mobile — where attention is fragmented by notifications, environment, and multitasking — err toward the lower end.
 
 **Mobile implication:** Mobile screens show even fewer items at once. Chunk aggressively.
 
@@ -151,8 +151,8 @@ How many top-level destinations?
 │   ├── Users switch frequently between them? → Bottom Tab Bar
 │   └── One primary + others secondary? → Bottom Tab Bar (with emphasis on primary)
 │
-├── 6+ destinations
-│   ├── All equally important? → Drawer (hamburger menu)
+├── 6+ destinations (⚠ first ask: can you restructure to fewer top-level items?)
+│   ├── Truly all equally important? → Drawer (hamburger menu)
 │   └── 3-5 primary + rest secondary? → Bottom Tabs + "More" tab → Drawer/List
 │
 ├── Contextual sub-navigation within a section?
@@ -245,6 +245,18 @@ An empty state is a **first-run experience**, not an error. It's your chance to 
 | Server | "Something went wrong on our end." | Retry button + "Contact support" link |
 | Not found | "This [item] may have been removed." | Go back / Go home |
 | Permission | "You don't have access to this." | Request access / Go back |
+
+### Partial States
+
+**Show what you have, flag what's missing.** Partial states happen more than developers expect — one API call succeeds, another fails; cached data is available but stale; some list items loaded before the connection dropped.
+
+**Rules:**
+1. **Never hide everything because one piece failed.** If the profile loaded but the activity feed didn't, show the profile with an inline error on the feed section — not a full-screen error.
+2. **Indicate staleness.** If showing cached/stale data, add a subtle banner: "Last updated 2 hours ago · Tap to refresh." Don't silently present old data as current.
+3. **Allow selective retry.** If one section failed, offer retry on THAT section, not a full page reload that re-fetches everything (including what already succeeded).
+4. **Degrade gracefully.** Show the most critical content first. If secondary content fails (recommendations, "you might also like"), omit it silently — the user won't miss what they never saw.
+
+**Decision:** Ask "What's the minimum useful version of this screen?" That minimum is your partial state. Everything above it is progressive enhancement.
 
 ### Success States
 
