@@ -157,6 +157,8 @@ final tt = Theme.of(context).textTheme;
 
 **Decision:** Use `bodyLarge`/`bodyMedium` for content, `titleMedium`/`titleLarge` for section headers, `labelSmall`/`labelMedium` for captions and chips. Display styles are for hero text only.
 
+See [REFERENCE.md → App Theme Setup Template](REFERENCE.md#app-theme-setup-template) for a full light/dark theme setup with ColorScheme.fromSeed and ThemeExtension registration.
+
 ## Step 5: ThemeExtension — When and Why
 
 **Problem:** Apps need design tokens beyond what ColorScheme and TextTheme provide (spacing scales, border radii, custom semantic colors). Without ThemeExtension, these become scattered constants that can't adapt to dark mode or respond to theme changes.
@@ -226,13 +228,14 @@ class ResponsiveLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
-      if (constraints.maxWidth >= 1200) return desktop ?? tablet ?? mobile;
-      if (constraints.maxWidth >= 600) return tablet ?? mobile;
-      return mobile;
+      // >= 1200 → desktop, >= 600 → tablet, else → mobile
+      // Fallback chain: desktop ?? tablet ?? mobile
     });
   }
 }
 ```
+
+See [REFERENCE.md → Responsive Layout Template](REFERENCE.md#responsive-layout-template) for full implementation.
 
 ### Adaptive Grid (No Breakpoints Needed)
 
