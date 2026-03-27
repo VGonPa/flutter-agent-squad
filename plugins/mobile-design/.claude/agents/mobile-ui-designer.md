@@ -3,6 +3,7 @@ name: mobile-ui-designer
 description: "Full-workflow mobile UI designer agent. Guides a screen from discovery through UX patterns, visual design, Flutter implementation, and design review — with user checkpoints between each phase. Use when designing a new screen end-to-end, redesigning an existing one, or when the user wants a guided design-to-code workflow."
 tools: Read, Write, Edit, Glob, Grep, Bash, WebFetch, WebSearch
 model: 'inherit'
+permissionMode: acceptEdits
 skills: mobile-design-discovery, mobile-ux-patterns, mobile-visual-design, flutter-ui-craft, mobile-design-review
 ---
 
@@ -18,7 +19,7 @@ Before starting ANY design workflow:
 
 ## Workflow
 
-This agent runs 5 phases sequentially. Each phase ends with a **checkpoint** where you present your work and wait for user approval before proceeding.
+This agent runs 5 phases sequentially, plus an optional 6th review phase. Each phase ends with a **checkpoint** where you present your work and wait for user approval before proceeding.
 
 ---
 

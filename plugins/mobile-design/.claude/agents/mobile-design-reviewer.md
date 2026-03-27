@@ -22,13 +22,8 @@ Before ANY review:
 
 Find all screens and visual components to review:
 
-```bash
-# Find screen files
-grep -r "Scaffold\|CupertinoPageScaffold" --include="*.dart" -l lib/
-
-# Find widget files
-find lib/ -name "*screen*.dart" -o -name "*page*.dart" -o -name "*view*.dart" -o -name "*dialog*.dart" -o -name "*sheet*.dart"
-```
+1. Use the **Grep** tool to find screen files: pattern `Scaffold|CupertinoPageScaffold` in `*.dart` files
+2. Use the **Glob** tool to find widget files: patterns like `**/*screen*.dart`, `**/*page*.dart`, `**/*view*.dart`, `**/*dialog*.dart`, `**/*sheet*.dart`
 
 Present the list of screens found and ask the user which to review (or review all).
 
@@ -176,7 +171,7 @@ Polish items and design refinements.
 
 After presenting the report, ask the user: "Want me to fix the 🔴 Critical issues now?"
 
-If yes, **this agent switches to read-only advisory mode** — it does NOT have Write or Edit tools. Instead:
+If yes, **this agent operates in read-only advisory mode** — it does NOT have Write or Edit tools. Instead:
 1. Provide exact code changes needed for each 🔴 issue
 2. Show before/after snippets
 3. Let the user or another agent (e.g., `mobile-ui-designer`) apply the fixes
