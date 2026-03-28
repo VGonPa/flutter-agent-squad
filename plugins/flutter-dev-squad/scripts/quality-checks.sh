@@ -57,6 +57,8 @@ OPTIONS
   --paths "dir1/ dir2/"       Scope file-based checks to specific directories
   --total-shards N            Split test suite into N shards (for CI parallelism)
   --shard-index I             Run shard I of N (0-based, requires --total-shards)
+  --output FORMAT             Output format: text (default) or json
+  --test-dirs "dir1/ dir2/"   Run tests only in specified directories
 
 AVAILABLE CHECKS
   format      Dart formatting (dart format --set-exit-if-changed)
@@ -138,6 +140,8 @@ SKIP_CHECKS=""
 CHECK_PATHS=""
 TOTAL_SHARDS=""
 SHARD_INDEX=""
+OUTPUT_FORMAT="text"
+TEST_DIRS=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -183,6 +187,22 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             SHARD_INDEX="$2"; shift 2 ;;
+        --output)
+            if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                echo "Error: --output requires a format: text or json."
+                exit 1
+            fi
+            if [ "$2" != "text" ] && [ "$2" != "json" ]; then
+                echo "Error: --output must be 'text' or 'json'."
+                exit 1
+            fi
+            OUTPUT_FORMAT="$2"; shift 2 ;;
+        --test-dirs)
+            if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
+                echo "Error: --test-dirs requires a directory list."
+                exit 1
+            fi
+            TEST_DIRS="$2"; shift 2 ;;
         *)
             echo "Error: unknown argument '$1'"
             echo "Run with --help for usage information."
@@ -350,7 +370,7 @@ TIMEOUT_CMD=$(find_timeout_cmd)
 
 # ─── COLORS ────────────────────────────────────────────────────────────────────
 
-if [ "$IS_CI" = "true" ]; then
+if [ "$IS_CI" = "true" ] || [ "$OUTPUT_FORMAT" = "json" ] || [ "${NO_COLOR:-}" != "" ] || [ "${TERM:-}" = "dumb" ] || [ ! -t 1 ]; then
     RED='' GREEN='' YELLOW='' CYAN='' BOLD='' DIM='' NC=''
 else
     RED=$'\033[0;31m'
@@ -434,6 +454,15 @@ format_duration() {
     fi
 }
 
+# Limit output lines (disabled in JSON mode to include ALL violations)
+head_limit() {
+    if [ "$OUTPUT_FORMAT" = "json" ]; then
+        cat
+    else
+        head -"${1:-5}"
+    fi
+}
+
 # ─── BANNER ────────────────────────────────────────────────────────────────────
 
 MODE_UPPER=$(echo "$MODE" | tr '[:lower:]' '[:upper:]')
@@ -467,7 +496,7 @@ if should_run "format"; then
     else
         UNFORMATTED=$(echo "$FORMAT_OUTPUT" | grep -c "Changed")
         print_error "Format: ${UNFORMATTED} archivos necesitan formateo"
-        echo "$FORMAT_OUTPUT" | grep "Changed" | head -5
+        echo "$FORMAT_OUTPUT" | grep "Changed" | head_limit 5
         FORMAT_STATUS="fail"
         mark_failed "Format"
     fi
@@ -517,12 +546,12 @@ if [ "$NEED_ANALYZE" = true ]; then
             else
                 if [ "$ANALYZE_ERRORS" -gt 0 ]; then
                     print_error "Analyze: ${ANALYZE_ERRORS} errores, ${ANALYZE_WARNINGS} warnings, ${ANALYZE_INFOS} infos"
-                    echo "$ANALYZE_OUTPUT" | grep " error " | head -5
+                    echo "$ANALYZE_OUTPUT" | grep " error " | head_limit 5
                     ANALYZE_STATUS="fail"
                     mark_failed "Analyze"
                 elif [ "$ANALYZE_WARNINGS" -gt 0 ]; then
                     print_warning "Analyze: ${ANALYZE_WARNINGS} warnings, ${ANALYZE_INFOS} infos"
-                    echo "$ANALYZE_OUTPUT" | grep " warning " | head -5
+                    echo "$ANALYZE_OUTPUT" | grep " warning " | head_limit 5
                     ANALYZE_STATUS="warn"
                 else
                     print_warning "Analyze: ${ANALYZE_INFOS} infos"
@@ -831,7 +860,7 @@ if should_run "linecount"; then
         LINECOUNT_STATUS="pass"
     else
         print_error "Line count: ${OVER_COUNT} archivos exceden 200 lineas"
-        printf '%b\n' "$LINECOUNT_OVER" | sort -t: -k2 -rn | head -5 | while IFS=: read -r f l; do
+        printf '%b\n' "$LINECOUNT_OVER" | sort -t: -k2 -rn | head_limit 5 | while IFS=: read -r f l; do
             echo "   ${f}: ${l} lineas"
         done
         LINECOUNT_STATUS="fail"
@@ -862,7 +891,7 @@ if should_run "secrets"; then
         # Fallback: basic grep
         HARDCODED=$(grep -rn --include="*.dart" \
             -E '(api[_-]?key|secret|password|token)\s*[:=]\s*["\x27][A-Za-z0-9+/=]{16,}' \
-            lib/ 2>/dev/null | grep -v '// ignore-secret' | head -5)
+            lib/ 2>/dev/null | grep -v '// ignore-secret' | head_limit 5)
         if [ -z "$HARDCODED" ]; then
             print_success "Secrets (basic scan): sin secrets obvios detectados"
             SECRETS_STATUS="pass"
@@ -893,8 +922,8 @@ if should_run "deadcode"; then
         DEADCODE_STATUS="pass"
     else
         print_warning "Dead code: ${DEADCODE_COUNT} elementos no usados"
-        echo "$DEADCODE_OUTPUT" | head -5
-        [ "$DEADCODE_COUNT" -gt 5 ] && echo "   ... y $((DEADCODE_COUNT - 5)) mas"
+        echo "$DEADCODE_OUTPUT" | head_limit 5
+        [ "$OUTPUT_FORMAT" != "json" ] && [ "$DEADCODE_COUNT" -gt 5 ] && echo "   ... and $((DEADCODE_COUNT - 5)) more"
         DEADCODE_STATUS="warn"
     fi
 else
@@ -921,8 +950,8 @@ if should_run "noprint"; then
     else
         NOPRINT_FILES=$(echo "$PRINT_OUTPUT" | cut -d: -f1 | sort -u | wc -l | tr -d ' ')
         print_warning "No print(): ${NOPRINT_COUNT} llamadas a print() en ${NOPRINT_FILES} archivos"
-        echo "$PRINT_OUTPUT" | head -5
-        [ "$NOPRINT_COUNT" -gt 5 ] && echo "   ... y $((NOPRINT_COUNT - 5)) mas"
+        echo "$PRINT_OUTPUT" | head_limit 5
+        [ "$OUTPUT_FORMAT" != "json" ] && [ "$NOPRINT_COUNT" -gt 5 ] && echo "   ... and $((NOPRINT_COUNT - 5)) more"
         NOPRINT_STATUS="warn"
     fi
 else
@@ -958,16 +987,16 @@ if should_run "architecture"; then
         if [ "$ARCH_CORE_COUNT" -gt 0 ]; then
             # core/ violations are critical — fail the build
             print_error "Architecture: ${ARCH_CORE_COUNT} illegal imports in core/ (must not import features/ or composition/)"
-            echo "$ARCH_CORE_OUTPUT" | head -10
-            [ "$ARCH_CORE_COUNT" -gt 10 ] && echo "   ... y $((ARCH_CORE_COUNT - 10)) mas"
+            echo "$ARCH_CORE_OUTPUT" | head_limit 10
+            [ "$OUTPUT_FORMAT" != "json" ] && [ "$ARCH_CORE_COUNT" -gt 10 ] && echo "   ... and $((ARCH_CORE_COUNT - 10)) more"
             mark_failed "architecture"
             ARCH_STATUS="fail"
         elif [ "$ARCH_SHARED_COUNT" -gt 0 ]; then
             # shared/ violations are tracked debt — warn only
             ARCH_SHARED_FILES=$(echo "$ARCH_SHARED_OUTPUT" | cut -d: -f1 | sort -u | wc -l | tr -d ' ')
             print_warning "Architecture: ${ARCH_SHARED_COUNT} imports from features/ or composition/ in shared/ (${ARCH_SHARED_FILES} files — known debt)"
-            echo "$ARCH_SHARED_OUTPUT" | head -10
-            [ "$ARCH_SHARED_COUNT" -gt 10 ] && echo "   ... y $((ARCH_SHARED_COUNT - 10)) mas"
+            echo "$ARCH_SHARED_OUTPUT" | head_limit 10
+            [ "$OUTPUT_FORMAT" != "json" ] && [ "$ARCH_SHARED_COUNT" -gt 10 ] && echo "   ... and $((ARCH_SHARED_COUNT - 10)) more"
             ARCH_STATUS="warn"
         else
             print_success "Architecture: import direction rules OK"
@@ -1443,6 +1472,180 @@ print_summary() {
     printf "\n"
 }
 
+# ─── JSON Summary ──────────────────────────────────────────────────────────────
+
+print_json_summary() {
+    local exit_code=0
+    [ -n "$FAILED_CHECKS" ] && exit_code=1
+
+    local _vdir
+    _vdir=$(mktemp -d /tmp/qc_json_XXXXXX)
+
+    # Write violation data to temp files for python to read safely
+    { echo "${FORMAT_OUTPUT:-}" | grep "Changed" || true; } > "$_vdir/format" 2>/dev/null
+    { echo "${ANALYZE_CLEAN:-}" | grep -E " error | warning " || true; } > "$_vdir/analyze" 2>/dev/null
+    { printf '%b\n' "${LINECOUNT_OVER:-}" || true; } > "$_vdir/linecount" 2>/dev/null
+    echo "${PRINT_OUTPUT:-}" > "$_vdir/noprint" 2>/dev/null
+    echo "${ARCH_CORE_OUTPUT:-}" > "$_vdir/arch_core" 2>/dev/null
+    echo "${ARCH_SHARED_OUTPUT:-}" > "$_vdir/arch_shared" 2>/dev/null
+    echo "${DEADCODE_OUTPUT:-}" > "$_vdir/deadcode" 2>/dev/null
+
+    cat > "$_vdir/status" <<SDATA
+mode=${MODE}
+exit_code=${exit_code}
+duration=${SCRIPT_DURATION}
+format_status=${FORMAT_STATUS}
+analyze_status=${ANALYZE_STATUS}
+analyze_errors=${ANALYZE_ERRORS:-0}
+analyze_warnings=${ANALYZE_WARNINGS:-0}
+analyze_infos=${ANALYZE_INFOS:-0}
+tests_status=${TESTS_STATUS}
+tests_count=${TESTS_COUNT:-0}
+tests_passed=${TESTS_PASSED:-0}
+tests_failed=${TESTS_FAILED:-0}
+coverage_status=${COVERAGE_STATUS}
+coverage_pct=${COVERAGE_PCT:-}
+linecount_status=${LINECOUNT_STATUS}
+secrets_status=${SECRETS_STATUS}
+deadcode_status=${DEADCODE_STATUS}
+noprint_status=${NOPRINT_STATUS}
+arch_status=${ARCH_STATUS}
+cc_status=${CC_STATUS}
+cc_max=${CC_MAX_VAL:-0}
+cc_violations=${CC_VIOLATIONS:-0}
+cc_threshold=${THRESHOLD_CC}
+nop_status=${NOP_STATUS}
+nop_max=${NOP_MAX_VAL:-0}
+nop_violations=${NOP_VIOLATIONS:-0}
+nop_threshold=${THRESHOLD_NOP}
+nest_status=${NEST_STATUS}
+nest_max=${NEST_MAX_VAL:-0}
+nest_violations=${NEST_VIOLATIONS:-0}
+nest_threshold=${THRESHOLD_NESTING}
+woc_status=${WOC_STATUS}
+woc_range=${WOC_RANGE:-N/A}
+failed_checks=${FAILED_CHECKS}
+SDATA
+
+    python3 - "$_vdir" <<'PYEOF'
+import json, sys, os
+
+vdir = sys.argv[1]
+
+def read_lines(name):
+    path = os.path.join(vdir, name)
+    try:
+        with open(path) as f:
+            return [l.strip() for l in f if l.strip()]
+    except FileNotFoundError:
+        return []
+
+def read_status():
+    d = {}
+    with open(os.path.join(vdir, "status")) as f:
+        for line in f:
+            line = line.strip()
+            if "=" in line:
+                k, v = line.split("=", 1)
+                d[k] = v
+    return d
+
+def safe_int(val):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return 0
+
+s = read_status()
+failed = [x.strip() for x in s.get("failed_checks", "").split(",") if x.strip()]
+
+cov_pct = s.get("coverage_pct", "")
+coverage_val = safe_int(cov_pct) if cov_pct else None
+
+data = {
+    "version": "1.0",
+    "mode": s["mode"],
+    "exit_code": safe_int(s["exit_code"]),
+    "duration_seconds": safe_int(s["duration"]),
+    "checks": {
+        "format": {
+            "status": s["format_status"],
+            "violations": read_lines("format")
+        },
+        "analyze": {
+            "status": s["analyze_status"],
+            "errors": safe_int(s["analyze_errors"]),
+            "warnings": safe_int(s["analyze_warnings"]),
+            "infos": safe_int(s["analyze_infos"]),
+            "violations": read_lines("analyze")
+        },
+        "tests": {
+            "status": s["tests_status"],
+            "total": safe_int(s["tests_count"]),
+            "passed": safe_int(s["tests_passed"]),
+            "failed": safe_int(s["tests_failed"]),
+            "violations": []
+        },
+        "coverage": {
+            "status": s["coverage_status"],
+            "percent": coverage_val,
+            "violations": []
+        },
+        "linecount": {
+            "status": s["linecount_status"],
+            "violations": read_lines("linecount")
+        },
+        "secrets": {
+            "status": s["secrets_status"],
+            "violations": []
+        },
+        "deadcode": {
+            "status": s["deadcode_status"],
+            "violations": read_lines("deadcode")
+        },
+        "noprint": {
+            "status": s["noprint_status"],
+            "violations": read_lines("noprint")
+        },
+        "architecture": {
+            "status": s["arch_status"],
+            "violations": read_lines("arch_core") + read_lines("arch_shared")
+        },
+        "metrics": {
+            "cyclomatic_complexity": {
+                "status": s["cc_status"],
+                "max_value": safe_int(s["cc_max"]),
+                "threshold": safe_int(s["cc_threshold"]),
+                "violations": safe_int(s["cc_violations"])
+            },
+            "number_of_parameters": {
+                "status": s["nop_status"],
+                "max_value": safe_int(s["nop_max"]),
+                "threshold": safe_int(s["nop_threshold"]),
+                "violations": safe_int(s["nop_violations"])
+            },
+            "maximum_nesting_level": {
+                "status": s["nest_status"],
+                "max_value": safe_int(s["nest_max"]),
+                "threshold": safe_int(s["nest_threshold"]),
+                "violations": safe_int(s["nest_violations"])
+            },
+            "weight_of_class": {
+                "status": s["woc_status"],
+                "range": s.get("woc_range", "N/A")
+            }
+        }
+    },
+    "failed_checks": failed,
+    "summary": "FAIL: {}".format(", ".join(failed)) if failed else "All checks passed"
+}
+
+print(json.dumps(data, indent=2))
+PYEOF
+
+    rm -rf "$_vdir"
+}
+
 # ─── GitHub Actions Summary ────────────────────────────────────────────────────
 
 print_github_summary() {
@@ -1550,8 +1753,12 @@ print_github_summary() {
 
 # ─── RUN SUMMARIES ─────────────────────────────────────────────────────────────
 
-print_summary
-print_github_summary
+if [ "$OUTPUT_FORMAT" = "json" ]; then
+    print_json_summary
+else
+    print_summary
+    print_github_summary
+fi
 
 # ─── EXIT CODE ─────────────────────────────────────────────────────────────────
 
