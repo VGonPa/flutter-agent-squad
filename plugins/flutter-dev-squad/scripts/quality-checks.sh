@@ -270,6 +270,11 @@ SCRIPT_START=$SECONDS
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 cd "$REPO_ROOT" || exit 1
 
+if [ ! -f "pubspec.yaml" ]; then
+    echo "ERROR: No pubspec.yaml found in $REPO_ROOT. This script must run from a Flutter/Dart project root."
+    exit 1
+fi
+
 # ─── ENVIRONMENT: Flutter & Dart paths ─────────────────────────────────────────
 
 IS_CI="${GITHUB_ACTIONS:-false}"
@@ -313,8 +318,8 @@ else
     fi
     # 5. Fallback to PATH
     if [ -z "$FLUTTER" ]; then
-        FLUTTER=$(which flutter 2>/dev/null)
-        DART=$(which dart 2>/dev/null)
+        FLUTTER=$(command -v flutter 2>/dev/null)
+        DART=$(command -v dart 2>/dev/null)
     fi
     if [ -z "$FLUTTER" ] || [ ! -x "$FLUTTER" ]; then
         echo "ERROR: Flutter not found. Install FVM or add Flutter to your PATH."
@@ -934,35 +939,40 @@ fi
 # core/ violations → FAIL (hard gate). shared/ violations → WARN (known debt).
 # ═══════════════════════════════════════════════════════════════════════════════
 if should_run "architecture"; then
-    print_info "Verificando reglas de importacion entre capas..."
-
-    # Rule 1: core/ must not import from features/ or composition/
-    ARCH_CORE_OUTPUT=$(grep -rn --include="*.dart" -E "import\s+'.*/(features|composition)/" lib/core/ 2>/dev/null || true)
-    ARCH_CORE_COUNT=$(echo "$ARCH_CORE_OUTPUT" | grep -c . 2>/dev/null || echo "0")
-    [ -z "$ARCH_CORE_OUTPUT" ] && ARCH_CORE_COUNT=0
-
-    # Rule 2: shared/ must not import from features/ or composition/
-    ARCH_SHARED_OUTPUT=$(grep -rn --include="*.dart" -E "import\s+'.*(features|composition)/" lib/shared/ 2>/dev/null || true)
-    ARCH_SHARED_COUNT=$(echo "$ARCH_SHARED_OUTPUT" | grep -c . 2>/dev/null || echo "0")
-    [ -z "$ARCH_SHARED_OUTPUT" ] && ARCH_SHARED_COUNT=0
-
-    if [ "$ARCH_CORE_COUNT" -gt 0 ]; then
-        # core/ violations are critical — fail the build
-        print_error "Architecture: ${ARCH_CORE_COUNT} illegal imports in core/ (must not import features/ or composition/)"
-        echo "$ARCH_CORE_OUTPUT" | head -10
-        [ "$ARCH_CORE_COUNT" -gt 10 ] && echo "   ... y $((ARCH_CORE_COUNT - 10)) mas"
-        mark_failed "architecture"
-        ARCH_STATUS="fail"
-    elif [ "$ARCH_SHARED_COUNT" -gt 0 ]; then
-        # shared/ violations are tracked debt — warn only
-        ARCH_SHARED_FILES=$(echo "$ARCH_SHARED_OUTPUT" | cut -d: -f1 | sort -u | wc -l | tr -d ' ')
-        print_warning "Architecture: ${ARCH_SHARED_COUNT} imports from features/ or composition/ in shared/ (${ARCH_SHARED_FILES} files — known debt)"
-        echo "$ARCH_SHARED_OUTPUT" | head -10
-        [ "$ARCH_SHARED_COUNT" -gt 10 ] && echo "   ... y $((ARCH_SHARED_COUNT - 10)) mas"
-        ARCH_STATUS="warn"
+    if [ ! -d "lib/core" ] && [ ! -d "lib/shared" ]; then
+        print_info "Architecture: skipped (no lib/core/ or lib/shared/ found)"
+        ARCH_STATUS="skip"
     else
-        print_success "Architecture: import direction rules OK"
-        ARCH_STATUS="pass"
+        print_info "Verificando reglas de importacion entre capas..."
+
+        # Rule 1: core/ must not import from features/ or composition/
+        ARCH_CORE_OUTPUT=$(grep -rn --include="*.dart" -E "import\s+'.*/(features|composition)/" lib/core/ 2>/dev/null || true)
+        ARCH_CORE_COUNT=$(echo "$ARCH_CORE_OUTPUT" | grep -c . 2>/dev/null || echo "0")
+        [ -z "$ARCH_CORE_OUTPUT" ] && ARCH_CORE_COUNT=0
+
+        # Rule 2: shared/ must not import from features/ or composition/
+        ARCH_SHARED_OUTPUT=$(grep -rn --include="*.dart" -E "import\s+'.*(features|composition)/" lib/shared/ 2>/dev/null || true)
+        ARCH_SHARED_COUNT=$(echo "$ARCH_SHARED_OUTPUT" | grep -c . 2>/dev/null || echo "0")
+        [ -z "$ARCH_SHARED_OUTPUT" ] && ARCH_SHARED_COUNT=0
+
+        if [ "$ARCH_CORE_COUNT" -gt 0 ]; then
+            # core/ violations are critical — fail the build
+            print_error "Architecture: ${ARCH_CORE_COUNT} illegal imports in core/ (must not import features/ or composition/)"
+            echo "$ARCH_CORE_OUTPUT" | head -10
+            [ "$ARCH_CORE_COUNT" -gt 10 ] && echo "   ... y $((ARCH_CORE_COUNT - 10)) mas"
+            mark_failed "architecture"
+            ARCH_STATUS="fail"
+        elif [ "$ARCH_SHARED_COUNT" -gt 0 ]; then
+            # shared/ violations are tracked debt — warn only
+            ARCH_SHARED_FILES=$(echo "$ARCH_SHARED_OUTPUT" | cut -d: -f1 | sort -u | wc -l | tr -d ' ')
+            print_warning "Architecture: ${ARCH_SHARED_COUNT} imports from features/ or composition/ in shared/ (${ARCH_SHARED_FILES} files — known debt)"
+            echo "$ARCH_SHARED_OUTPUT" | head -10
+            [ "$ARCH_SHARED_COUNT" -gt 10 ] && echo "   ... y $((ARCH_SHARED_COUNT - 10)) mas"
+            ARCH_STATUS="warn"
+        else
+            print_success "Architecture: import direction rules OK"
+            ARCH_STATUS="pass"
+        fi
     fi
 else
     print_skip "Architecture"
