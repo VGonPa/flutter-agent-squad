@@ -999,7 +999,8 @@ fi
 # ── Process secrets results ──
 if should_run "secrets"; then
     _SEC_DATA=$(cat "$_GREP_DIR/secrets" 2>/dev/null)
-    _SEC_TOOL=$(echo "$_SEC_DATA" | head -1 | grep -oP '(?<=TOOL=).*' || echo "grep")
+    _SEC_TOOL=$(echo "$_SEC_DATA" | head -1 | sed -n 's/^TOOL=//p')
+    _SEC_TOOL="${_SEC_TOOL:-grep}"
     _SEC_BODY=$(echo "$_SEC_DATA" | tail -n +2)
 
     if [ "$_SEC_TOOL" = "detect-secrets" ]; then
