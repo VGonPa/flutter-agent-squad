@@ -29,6 +29,7 @@ set -o pipefail
 THRESHOLD_CC=10          # Cyclomatic Complexity: grade B max (1-10 OK, 11+ fail)
 THRESHOLD_NOP=4          # Number of Parameters (1-4 OK, 5+ fail)
 THRESHOLD_NESTING=3      # Maximum Nesting Level (1-3 OK, 4+ fail)
+THRESHOLD_LINECOUNT=200  # Max lines per non-generated .dart file
 # Weight of Class: informational only, no threshold
 # ─── TIMEOUT SETTINGS ────────────────────────────────────────────────────────
 TEST_TIMEOUT=300         # Max seconds for test suite (5 min default)
@@ -100,8 +101,8 @@ EXAMPLES
   # Fast pre-commit checks
   ./scripts/quality-checks.sh pre-commit
 
-  # Pre-commit scoped to BLE module
-  ./scripts/quality-checks.sh pre-commit --paths "lib/core/ble/ test/src/core/ble/"
+  # Pre-commit scoped to auth module
+  ./scripts/quality-checks.sh pre-commit --paths "lib/auth/ test/auth/"
 
   # Run only tests
   ./scripts/quality-checks.sh --only tests
@@ -174,16 +175,28 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: --timeout requires a value in seconds."
                 exit 1
             fi
+            if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                echo "Error: --timeout value must be a positive integer, got '$2'."
+                exit 1
+            fi
             TEST_TIMEOUT="$2"; shift 2 ;;
         --total-shards)
             if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
                 echo "Error: --total-shards requires a positive integer."
                 exit 1
             fi
+            if ! [[ "$2" =~ ^[0-9]+$ ]] || [ "$2" -eq 0 ]; then
+                echo "Error: --total-shards must be a positive integer, got '$2'."
+                exit 1
+            fi
             TOTAL_SHARDS="$2"; shift 2 ;;
         --shard-index)
             if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
                 echo "Error: --shard-index requires a non-negative integer."
+                exit 1
+            fi
+            if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                echo "Error: --shard-index must be a non-negative integer, got '$2'."
                 exit 1
             fi
             SHARD_INDEX="$2"; shift 2 ;;
@@ -618,7 +631,7 @@ METRICS_JSON_FILE=""
 cleanup() {
     rm -f "$TEST_JSON_FILE" "${TEST_JSON_FILE}.err" "$METRICS_JSON_FILE" 2>/dev/null
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 if should_run "tests"; then
     if [ -n "$TEST_DIRS" ]; then
@@ -692,7 +705,7 @@ if should_run "tests"; then
 
     # Detect timeout (exit 124 from timeout command)
     if [ $TEST_EXIT -eq 124 ]; then
-        print_error "Tests: TIMEOUT despues de ${TEST_TIMEOUT}s — posible test colgado"
+        print_error "Tests: TIMEOUT after ${TEST_TIMEOUT}s — possible hanging test"
         if [ -s "${TEST_JSON_FILE}.err" ]; then
             print_error "Stderr output:"
             head -20 "${TEST_JSON_FILE}.err"
@@ -805,13 +818,13 @@ print(f'TESTS_TOTAL_SECS={total_secs:.1f}')
     # Report test results
     if [ $TEST_EXIT -eq 0 ]; then
         if [ "$MODE" = "pre-commit" ] && [ "$NEED_COVERAGE_FLAG" = false ]; then
-            print_success "Tests (unit): todos pasaron — ${TESTS_COUNT:-?} tests"
+            print_success "Tests (unit): all passed — ${TESTS_COUNT:-?} tests"
         else
-            print_success "Tests: todos pasaron — ${TESTS_COUNT:-?} tests"
+            print_success "Tests: all passed — ${TESTS_COUNT:-?} tests"
         fi
         TESTS_STATUS="pass"
     else
-        print_error "Tests: ${TESTS_FAILED:-algunos} tests fallaron"
+        print_error "Tests: ${TESTS_FAILED:-some} tests failed"
         if [ -s "${TEST_JSON_FILE}.err" ]; then
             echo "  ${DIM}--- stderr ---${NC}"
             head -10 "${TEST_JSON_FILE}.err"
@@ -823,7 +836,7 @@ print(f'TESTS_TOTAL_SECS={total_secs:.1f}')
     # Show per-module timing table
     if [ -n "$TEST_DURATION_TABLE" ]; then
         printf "\n"
-        printf "  ${BOLD}Modulo                              Tests   Tiempo${NC}\n"
+        printf "  ${BOLD}Module                              Tests   Time${NC}\n"
         printf "  ${DIM}──────────────────────────────────────────────────${NC}\n"
         echo "$TEST_DURATION_TABLE" | while IFS='|' read -r module count duration; do
             printf "  %-36s %5s   %s\n" "$module" "$count" "$duration"
@@ -854,22 +867,22 @@ if should_run "coverage"; then
         if [ "$TOTAL_LINES" -gt 0 ]; then
             COVERAGE_PCT=$((COVERED_LINES * 100 / TOTAL_LINES))
             if [ "$COVERAGE_PCT" -ge 90 ]; then
-                print_success "Coverage: ${COVERAGE_PCT}% (${COVERED_LINES}/${TOTAL_LINES} líneas)"
+                print_success "Coverage: ${COVERAGE_PCT}% (${COVERED_LINES}/${TOTAL_LINES} lines)"
                 COVERAGE_STATUS="pass"
             elif [ "$COVERAGE_PCT" -ge 80 ]; then
-                print_warning "Coverage: ${COVERAGE_PCT}% (objetivo: 90%)"
+                print_warning "Coverage: ${COVERAGE_PCT}% (target: 90%)"
                 COVERAGE_STATUS="warn"
             else
-                print_error "Coverage: ${COVERAGE_PCT}% (mínimo: 80%)"
+                print_error "Coverage: ${COVERAGE_PCT}% (minimum: 80%)"
                 COVERAGE_STATUS="fail"
                 mark_failed "Coverage"
             fi
         else
-            print_warning "Coverage: sin datos de cobertura"
+            print_warning "Coverage: no coverage data"
             COVERAGE_STATUS="warn"
         fi
     else
-        print_warning "Coverage: no se encontro lcov.info (ejecuta tests primero o usa --only tests,coverage)"
+        print_warning "Coverage: lcov.info not found (run tests first or use --only tests,coverage)"
         COVERAGE_STATUS="warn"
     fi
 else
@@ -901,7 +914,7 @@ if should_run "linecount"; then
         fi
         while IFS= read -r file; do
             LINES=$(wc -l < "$file" | tr -d ' ')
-            if [ "$LINES" -gt 200 ]; then
+            if [ "$LINES" -gt "$THRESHOLD_LINECOUNT" ]; then
                 echo "${file}:${LINES}"
             fi
         done < "$_df"
@@ -915,7 +928,7 @@ if should_run "secrets"; then
     (
         if command -v detect-secrets &>/dev/null; then
             echo "TOOL=detect-secrets"
-            detect-secrets scan --exclude-files '.*\.lock' --exclude-files 'coverage/.*' --exclude-files '\.fvm/.*' .
+            detect-secrets scan --exclude-files '.*\.lock' --exclude-files 'coverage/.*' --exclude-files '\.fvm/.*' --exclude-files 'build/.*' --exclude-files '\.dart_tool/.*' .
         else
             echo "TOOL=grep"
             grep -rn --include="*.dart" \
@@ -930,9 +943,9 @@ fi
 if should_run "noprint"; then
     (
         if [ "$MODE" = "pre-commit" ] && [ -n "$CHECK_PATHS" ]; then
-            grep -rn --include="*.dart" -E '^\s*print\(' $CHECK_PATHS 2>/dev/null | grep -v '// allow-print' || true
+            grep -rn --include="*.dart" -E '\bprint\(' $CHECK_PATHS 2>/dev/null | grep -v '// allow-print' || true
         else
-            grep -rn --include="*.dart" -E '^\s*print\(' lib/ 2>/dev/null | grep -v '// allow-print' || true
+            grep -rn --include="*.dart" -E '\bprint\(' lib/ 2>/dev/null | grep -v '// allow-print' || true
         fi
     ) > "$_GREP_DIR/noprint" 2>/dev/null &
     _NP_PID=$!
@@ -943,9 +956,9 @@ if should_run "architecture"; then
     if [ -d "lib/core" ] || [ -d "lib/shared" ]; then
         (
             echo "===CORE==="
-            grep -rn --include="*.dart" -E "import\s+'.*/(features|composition)/" lib/core/ 2>/dev/null || true
+            grep -rn --include="*.dart" -E "import\s+['\"].*/(features|composition)/" lib/core/ 2>/dev/null || true
             echo "===SHARED==="
-            grep -rn --include="*.dart" -E "import\s+'.*(features|composition)/" lib/shared/ 2>/dev/null || true
+            grep -rn --include="*.dart" -E "import\s+['\"].*(features|composition)/" lib/shared/ 2>/dev/null || true
         ) > "$_GREP_DIR/arch" 2>/dev/null &
         _ARCH_PID=$!
     fi
@@ -968,10 +981,10 @@ if should_run "linecount"; then
     fi
 
     if [ "$OVER_COUNT" -eq 0 ]; then
-        print_success "Line count: all files <= 200 lines"
+        print_success "Line count: all files <= ${THRESHOLD_LINECOUNT} lines"
         LINECOUNT_STATUS="pass"
     else
-        print_error "Line count: ${OVER_COUNT} files exceed 200 lines"
+        print_error "Line count: ${OVER_COUNT} files exceed ${THRESHOLD_LINECOUNT} lines"
         echo "$LINECOUNT_OVER" | sort -t: -k2 -rn | head_limit 5 | while IFS=: read -r f l; do
             echo "   ${f}: ${l} lines"
         done
@@ -1115,8 +1128,8 @@ if should_run "metrics"; then
 
     if [ -n "$METRICS_CMD" ]; then
         printf "\n"
-        print_info "Analizando metricas de codigo (dart_code_metrics)..."
-        printf "  ${DIM}Limites: CC <= %s | NOP <= %s | Nesting <= %s | WOC: info${NC}\n" "$THRESHOLD_CC" "$THRESHOLD_NOP" "$THRESHOLD_NESTING"
+        print_info "Analyzing code metrics (dart_code_metrics)..."
+        printf "  ${DIM}Limits: CC <= %s | NOP <= %s | Nesting <= %s | WOC: info${NC}\n" "$THRESHOLD_CC" "$THRESHOLD_NOP" "$THRESHOLD_NESTING"
 
         METRICS_JSON_FILE=$(mktemp /tmp/dcm_metrics_XXXXXX.json)
 
@@ -1278,7 +1291,7 @@ print('PARSE_OK=1')
 
             # ── Cyclomatic Complexity ──
             if [ "${CC_VIOLATIONS:-0}" -gt 0 ]; then
-                print_error "Cyclomatic Complexity: ${CC_VIOLATIONS} funciones exceden limite (max: ${CC_MAX_VAL}, limite: ${THRESHOLD_CC})"
+                print_error "Cyclomatic Complexity: ${CC_VIOLATIONS} functions exceed limit (max: ${CC_MAX_VAL}, limit: ${THRESHOLD_CC})"
                 echo "$CC_DETAILS" | head -5 | while IFS=: read -r f func val; do
                     printf "     ${DIM}%s:%s — CC %s${NC}\n" "$f" "$func" "$val"
                 done
@@ -1291,7 +1304,7 @@ print('PARSE_OK=1')
 
             # ── Number of Parameters ──
             if [ "${NOP_VIOLATIONS:-0}" -gt 0 ]; then
-                print_error "Number of Parameters: ${NOP_VIOLATIONS} funciones exceden limite (max: ${NOP_MAX_VAL}, limite: ${THRESHOLD_NOP})"
+                print_error "Number of Parameters: ${NOP_VIOLATIONS} functions exceed limit (max: ${NOP_MAX_VAL}, limit: ${THRESHOLD_NOP})"
                 echo "$NOP_DETAILS" | head -5 | while IFS=: read -r f func val; do
                     printf "     ${DIM}%s:%s — %s params${NC}\n" "$f" "$func" "$val"
                 done
@@ -1304,7 +1317,7 @@ print('PARSE_OK=1')
 
             # ── Maximum Nesting Level ──
             if [ "${NEST_VIOLATIONS:-0}" -gt 0 ]; then
-                print_error "Maximum Nesting Level: ${NEST_VIOLATIONS} funciones exceden limite (max: ${NEST_MAX_VAL}, limite: ${THRESHOLD_NESTING})"
+                print_error "Maximum Nesting Level: ${NEST_VIOLATIONS} functions exceed limit (max: ${NEST_MAX_VAL}, limit: ${THRESHOLD_NESTING})"
                 echo "$NEST_DETAILS" | head -5 | while IFS=: read -r f func val; do
                     printf "     ${DIM}%s:%s — nesting %s${NC}\n" "$f" "$func" "$val"
                 done
@@ -1318,16 +1331,16 @@ print('PARSE_OK=1')
             # ── Weight of Class (informational) ──
             if [ "${WOC_COUNT:-0}" -gt 0 ] && [ "$WOC_MIN" != "N/A" ]; then
                 WOC_RANGE="${WOC_MIN} — ${WOC_MAX}"
-                print_info "Weight of Class: rango ${WOC_RANGE} (${WOC_COUNT} clases)"
+                print_info "Weight of Class: range ${WOC_RANGE} (${WOC_COUNT} classes)"
                 WOC_STATUS="info"
             else
-                print_info "Weight of Class: sin datos de clases"
+                print_info "Weight of Class: no class data"
                 WOC_STATUS="info"
                 WOC_RANGE="N/A"
             fi
         else
             # ── Fallback: console reporter ──
-            print_warning "Metricas JSON no disponible — usando console reporter"
+            print_warning "JSON metrics not available — using console reporter"
             METRICS_OUTPUT=$($METRICS_CMD analyze lib/ --reporter=console --set-exit-on-violation-level=noted 2>&1)
 
             # Parse console output for individual metric violations
@@ -1336,29 +1349,29 @@ print('PARSE_OK=1')
             NEST_CONSOLE=$(echo "$METRICS_OUTPUT" | grep -ci "maximum-nesting-level\|nesting-level" 2>/dev/null; true)
 
             if [ "$CC_CONSOLE" -gt 0 ]; then
-                print_error "Cyclomatic Complexity: ${CC_CONSOLE} violaciones detectadas"
+                print_error "Cyclomatic Complexity: ${CC_CONSOLE} violations detected"
                 CC_STATUS="fail"
                 mark_failed "Cyclomatic Complexity"
             else
-                print_success "Cyclomatic Complexity: sin violaciones"
+                print_success "Cyclomatic Complexity: no violations"
                 CC_STATUS="pass"
             fi
 
             if [ "$NOP_CONSOLE" -gt 0 ]; then
-                print_error "Number of Parameters: ${NOP_CONSOLE} violaciones detectadas"
+                print_error "Number of Parameters: ${NOP_CONSOLE} violations detected"
                 NOP_STATUS="fail"
                 mark_failed "Number of Parameters"
             else
-                print_success "Number of Parameters: sin violaciones"
+                print_success "Number of Parameters: no violations"
                 NOP_STATUS="pass"
             fi
 
             if [ "$NEST_CONSOLE" -gt 0 ]; then
-                print_error "Maximum Nesting Level: ${NEST_CONSOLE} violaciones detectadas"
+                print_error "Maximum Nesting Level: ${NEST_CONSOLE} violations detected"
                 NEST_STATUS="fail"
                 mark_failed "Maximum Nesting Level"
             else
-                print_success "Maximum Nesting Level: sin violaciones"
+                print_success "Maximum Nesting Level: no violations"
                 NEST_STATUS="pass"
             fi
 
@@ -1369,7 +1382,7 @@ print('PARSE_OK=1')
         # Cleanup handled by EXIT trap
     else
         # DCM not installed
-        print_warning "dart_code_metrics no instalado. Instala con: dart pub global activate dart_code_metrics"
+        print_warning "dart_code_metrics not installed. Install with: dart pub global activate dart_code_metrics"
         CC_STATUS="skip"
         NOP_STATUS="skip"
         NEST_STATUS="skip"
@@ -1411,7 +1424,7 @@ print_summary() {
 
     printf "\n"
     printf "${BOLD}=======================================================================${NC}\n"
-    printf "${BOLD}              RESUMEN DE CALIDAD — %s${NC}\n" "$MODE_UPPER"
+    printf "${BOLD}              QUALITY SUMMARY — %s${NC}\n" "$MODE_UPPER"
     printf "${BOLD}=======================================================================${NC}\n"
     printf "\n"
 
@@ -1438,7 +1451,7 @@ print_summary() {
     case "$ANALYZE_STATUS" in
         pass) summary_row "✅" "Analyze" "$GREEN" "PASS" "0 issues" ;;
         warn) summary_row "⚠️ " "Analyze" "$YELLOW" "WARN" "${ANALYZE_ERRORS} errors, ${ANALYZE_WARNINGS} warnings, ${ANALYZE_INFOS} infos" ;;
-        fail) summary_row "❌" "Analyze" "$RED" "FAIL" "${ANALYZE_ERRORS} errores" ;;
+        fail) summary_row "❌" "Analyze" "$RED" "FAIL" "${ANALYZE_ERRORS} errors" ;;
         skip) [ -z "$ONLY_CHECKS" ] && summary_row "⏭️ " "Analyze" "$DIM" "SKIP" ;;
     esac
 
@@ -1469,9 +1482,9 @@ print_summary() {
 
     # 5. Line count
     case "$LINECOUNT_STATUS" in
-        pass) summary_row "✅" "Line count (<=200)" "$GREEN" "PASS" ;;
-        fail) summary_row "❌" "Line count (<=200)" "$RED" "FAIL" "${OVER_COUNT} archivos" ;;
-        skip) [ -z "$ONLY_CHECKS" ] && summary_row "⏭️ " "Line count (<=200)" "$DIM" "SKIP" ;;
+        pass) summary_row "✅" "Line count (<=${THRESHOLD_LINECOUNT})" "$GREEN" "PASS" ;;
+        fail) summary_row "❌" "Line count (<=${THRESHOLD_LINECOUNT})" "$RED" "FAIL" "${OVER_COUNT} files" ;;
+        skip) [ -z "$ONLY_CHECKS" ] && summary_row "⏭️ " "Line count (<=${THRESHOLD_LINECOUNT})" "$DIM" "SKIP" ;;
     esac
 
     # 6. Secrets
@@ -1511,28 +1524,28 @@ print_summary() {
         printf "  ${DIM}--- Code Metrics (dart_code_metrics) -------------------------${NC}\n"
     fi
 
-    # 9. Cyclomatic Complexity
+    # 10. Cyclomatic Complexity
     case "$CC_STATUS" in
         pass) summary_row "✅" "Cyclomatic Complexity" "$GREEN" "PASS" "max: ${CC_MAX_VAL} (<=${THRESHOLD_CC})" ;;
         fail) summary_row "❌" "Cyclomatic Complexity" "$RED" "FAIL" "${CC_VIOLATIONS} over limit (<=${THRESHOLD_CC})" ;;
         skip) [ -z "$ONLY_CHECKS" ] && summary_row "⏭️ " "Cyclomatic Complexity" "$DIM" "SKIP" ;;
     esac
 
-    # 10. Number of Parameters
+    # 11. Number of Parameters
     case "$NOP_STATUS" in
         pass) summary_row "✅" "Number of Parameters" "$GREEN" "PASS" "max: ${NOP_MAX_VAL} (<=${THRESHOLD_NOP})" ;;
         fail) summary_row "❌" "Number of Parameters" "$RED" "FAIL" "${NOP_VIOLATIONS} over limit (<=${THRESHOLD_NOP})" ;;
         skip) [ -z "$ONLY_CHECKS" ] && summary_row "⏭️ " "Number of Parameters" "$DIM" "SKIP" ;;
     esac
 
-    # 11. Maximum Nesting Level
+    # 12. Maximum Nesting Level
     case "$NEST_STATUS" in
         pass) summary_row "✅" "Maximum Nesting Level" "$GREEN" "PASS" "max: ${NEST_MAX_VAL} (<=${THRESHOLD_NESTING})" ;;
         fail) summary_row "❌" "Maximum Nesting Level" "$RED" "FAIL" "${NEST_VIOLATIONS} over limit (<=${THRESHOLD_NESTING})" ;;
         skip) [ -z "$ONLY_CHECKS" ] && summary_row "⏭️ " "Maximum Nesting Level" "$DIM" "SKIP" ;;
     esac
 
-    # 12. Weight of Class (info only)
+    # 13. Weight of Class (info only)
     case "$WOC_STATUS" in
         info) summary_row "ℹ️ " "Weight of Class" "$CYAN" "INFO" "${WOC_RANGE:-N/A}" ;;
         skip) [ -z "$ONLY_CHECKS" ] && summary_row "⏭️ " "Weight of Class" "$DIM" "SKIP" ;;
@@ -1543,12 +1556,12 @@ print_summary() {
 
     # Final verdict
     if [ -n "$FAILED_CHECKS" ]; then
-        printf "  ${RED}${BOLD}REQUIERE ATENCIÓN${NC} - Fallos en: ${RED}%s${NC}\n" "$FAILED_CHECKS"
-        printf "  ${YELLOW}Recomendación: Arregla los errores antes de continuar${NC}\n"
+        printf "  ${RED}${BOLD}NEEDS ATTENTION${NC} - Failed: ${RED}%s${NC}\n" "$FAILED_CHECKS"
+        printf "  ${YELLOW}Recommendation: Fix errors before proceeding${NC}\n"
     elif [ "$warn_count" -gt 0 ]; then
-        printf "  ${YELLOW}${BOLD}OK${NC} - Listo (con warnings)\n"
+        printf "  ${YELLOW}${BOLD}OK${NC} - Passed (with warnings)\n"
     else
-        printf "  ${GREEN}${BOLD}TODO OK${NC} - Listo\n"
+        printf "  ${GREEN}${BOLD}ALL OK${NC} - Passed\n"
     fi
 
     printf "${BOLD}-----------------------------------------------------------------------${NC}\n"
@@ -1558,7 +1571,7 @@ print_summary() {
     fi
     local flutter_ver
     flutter_ver=$($FLUTTER --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    printf "  ${DIM}Duracion: %s | Flutter: %s%s${NC}\n" "$(format_duration $SCRIPT_DURATION)" "$flutter_ver" "$skip_info"
+    printf "  ${DIM}Duration: %s | Flutter: %s%s${NC}\n" "$(format_duration $SCRIPT_DURATION)" "$flutter_ver" "$skip_info"
     printf "${BOLD}-----------------------------------------------------------------------${NC}\n"
     printf "\n"
 }
