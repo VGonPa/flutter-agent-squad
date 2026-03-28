@@ -395,6 +395,24 @@ else
     NC=$'\033[0m'
 fi
 
+# ─── ENVIRONMENT: Python3 ─────────────────────────────────────────────────────
+# python3 is needed for: detect-secrets JSON parsing, metrics JSON parsing,
+# test timing parsing, and --output json formatting.
+# Not a hard requirement — checks degrade gracefully when missing.
+
+HAS_PYTHON3=true
+if ! command -v python3 &>/dev/null; then
+    HAS_PYTHON3=false
+    printf "\n"
+    printf "${YELLOW}WARNING: python3 not found in PATH${NC}\n"
+    printf "${YELLOW}  Some checks will be degraded or skipped:${NC}\n"
+    printf "${YELLOW}  - Secrets scan (detect-secrets): will be skipped (cannot parse JSON)${NC}\n"
+    printf "${YELLOW}  - Code metrics: JSON parsing unavailable, will use console fallback${NC}\n"
+    printf "${YELLOW}  - Test timing breakdown: unavailable${NC}\n"
+    printf "${YELLOW}  Install Python 3 for full quality coverage.${NC}\n"
+    printf "\n"
+fi
+
 # ─── STATUS TRACKING ──────────────────────────────────────────────────────────
 
 FORMAT_STATUS="pending"
@@ -719,7 +737,7 @@ if should_run "tests"; then
     if [ $TEST_EXIT -ne 124 ]; then
 
     # Parse JSON reporter output for test counts and per-test timing
-    if [ -s "$TEST_JSON_FILE" ]; then
+    if [ -s "$TEST_JSON_FILE" ] && [ "$HAS_PYTHON3" = true ]; then
         PARSED_OUTPUT=$(python3 -c "
 import json, sys, os
 from collections import defaultdict
@@ -1005,14 +1023,23 @@ if should_run "secrets"; then
     _SEC_BODY=$(echo "$_SEC_DATA" | tail -n +2)
 
     if [ "$_SEC_TOOL" = "detect-secrets" ]; then
-        SECRETS_COUNT=$(echo "$_SEC_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print(sum(len(v) for v in data.get('results', {}).values()))" 2>/dev/null || echo "0")
-        if [ "$SECRETS_COUNT" = "0" ]; then
-            print_success "Detect-secrets: no secrets detected"
-            SECRETS_STATUS="pass"
+        if [ "$HAS_PYTHON3" = false ]; then
+            print_warning "Secrets (detect-secrets): SKIPPED — python3 is required to parse results"
+            print_warning "  Install python3 to enable secrets scanning. Cannot verify 0 secrets without it."
+            SECRETS_STATUS="skip"
         else
-            print_error "Detect-secrets: ${SECRETS_COUNT} potential secrets found"
-            SECRETS_STATUS="fail"
-            mark_failed "Secrets"
+            SECRETS_COUNT=$(echo "$_SEC_BODY" | python3 -c "import sys, json; data=json.load(sys.stdin); print(sum(len(v) for v in data.get('results', {}).values()))" 2>/dev/null)
+            if [ -z "$SECRETS_COUNT" ]; then
+                print_warning "Secrets (detect-secrets): SKIPPED — failed to parse scan results"
+                SECRETS_STATUS="skip"
+            elif [ "$SECRETS_COUNT" = "0" ]; then
+                print_success "Detect-secrets: no secrets detected"
+                SECRETS_STATUS="pass"
+            else
+                print_error "Detect-secrets: ${SECRETS_COUNT} potential secrets found"
+                SECRETS_STATUS="fail"
+                mark_failed "Secrets"
+            fi
         fi
     else
         HARDCODED="$_SEC_BODY"
@@ -1152,7 +1179,7 @@ if should_run "metrics"; then
         METRICS_JSON_EXIT=${PIPESTATUS[0]}
 
         METRICS_PARSED=""
-        if [ $METRICS_JSON_EXIT -eq 0 ] && [ -s "$METRICS_JSON_FILE" ]; then
+        if [ $METRICS_JSON_EXIT -eq 0 ] && [ -s "$METRICS_JSON_FILE" ] && [ "$HAS_PYTHON3" = true ]; then
             METRICS_PARSED=$(python3 -c "
 import json, sys, re
 
@@ -1342,7 +1369,11 @@ print('PARSE_OK=1')
             fi
         else
             # ── Fallback: console reporter ──
-            print_warning "JSON metrics not available — using console reporter"
+            if [ "$HAS_PYTHON3" = false ]; then
+                print_warning "Metrics JSON parsing skipped (python3 not available) — using console reporter"
+            else
+                print_warning "JSON metrics not available — using console reporter"
+            fi
             METRICS_OUTPUT=$($METRICS_CMD analyze lib/ --reporter=console --set-exit-on-violation-level=noted 2>&1)
 
             # Parse console output for individual metric violations
@@ -1581,6 +1612,11 @@ print_summary() {
 # ─── JSON Summary ──────────────────────────────────────────────────────────────
 
 print_json_summary() {
+    if [ "$HAS_PYTHON3" = false ]; then
+        echo '{"error": "python3 not available — cannot generate JSON output"}' >&2
+        return 1
+    fi
+
     local exit_code=0
     [ -n "$FAILED_CHECKS" ] && exit_code=1
 
