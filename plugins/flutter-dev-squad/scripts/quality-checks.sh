@@ -374,15 +374,38 @@ fi
 DART_PUB_BIN="$HOME/.pub-cache/bin"
 
 # Find timeout command (GNU coreutils: 'timeout' on Linux, 'gtimeout' on macOS via brew)
+# If neither is available, define a bash-native fallback so tests NEVER hang.
 find_timeout_cmd() {
     if command -v timeout &>/dev/null; then
         echo "timeout"
     elif command -v gtimeout &>/dev/null; then
         echo "gtimeout"
     else
-        echo ""
+        echo "_bash_timeout"
     fi
 }
+
+# Bash-native timeout fallback for systems without GNU coreutils.
+# Usage: _bash_timeout SECONDS COMMAND [ARGS...]
+# Mimics `timeout` behavior: runs command, kills after SECONDS, returns 124 on timeout.
+_bash_timeout() {
+    local secs="$1"; shift
+    "$@" &
+    local cmd_pid=$!
+    ( sleep "$secs" && kill "$cmd_pid" 2>/dev/null ) &
+    local watchdog_pid=$!
+    wait "$cmd_pid" 2>/dev/null
+    local exit_code=$?
+    # If command finished before timeout, kill the watchdog
+    kill "$watchdog_pid" 2>/dev/null
+    wait "$watchdog_pid" 2>/dev/null 2>&1
+    # Check if process was killed by our watchdog (SIGTERM = 143)
+    if [ $exit_code -eq 143 ]; then
+        return 124  # Match GNU timeout exit code
+    fi
+    return $exit_code
+}
+
 TIMEOUT_CMD=$(find_timeout_cmd)
 
 # ─── COLORS ────────────────────────────────────────────────────────────────────
@@ -550,11 +573,7 @@ fi
 # Launch analyze in background
 if [ "$NEED_ANALYZE" = true ]; then
     {
-        if [ -n "$TIMEOUT_CMD" ]; then
-            "$TIMEOUT_CMD" "$ANALYZE_TIMEOUT" "$FLUTTER" analyze --no-pub
-        else
-            "$FLUTTER" analyze --no-pub
-        fi
+        "$TIMEOUT_CMD" "$ANALYZE_TIMEOUT" "$FLUTTER" analyze --no-pub
     } > "$_ANA_OUT" 2>&1 &
     _ANA_PID=$!
 fi
@@ -668,21 +687,13 @@ if should_run "tests"; then
             COVERAGE_FLAG="--coverage"
         fi
         print_info "Running tests in ${TEST_DIRS[*]}..."
-        if [ -n "$TIMEOUT_CMD" ]; then
-            "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test "${TEST_DIRS[@]}" $COVERAGE_FLAG --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
-        else
-            "$FLUTTER" test "${TEST_DIRS[@]}" $COVERAGE_FLAG --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
-        fi
+        "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test "${TEST_DIRS[@]}" $COVERAGE_FLAG --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
         TEST_EXIT=$?
         unset COVERAGE_FLAG
     elif [ "$MODE" = "pre-commit" ] && [ "$NEED_COVERAGE_FLAG" = false ]; then
         # Pre-commit: unit tests only, no coverage
         print_info "Running unit tests (--tags unit)..."
-        if [ -n "$TIMEOUT_CMD" ]; then
-            "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test --tags unit --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
-        else
-            "$FLUTTER" test --tags unit --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
-        fi
+        "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test --tags unit --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
         TEST_EXIT=$?
 
         # If --paths provided, also run tests in those directories
@@ -697,11 +708,7 @@ if should_run "tests"; then
             if [ -n "$PATH_TEST_DIRS" ]; then
                 print_info "Running tests in affected paths ($PATH_TEST_DIRS)..."
                 PATH_TEST_JSON=$(mktemp /tmp/flutter_path_test_XXXXXX.jsonl)
-                if [ -n "$TIMEOUT_CMD" ]; then
-                    "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test $PATH_TEST_DIRS --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$PATH_TEST_JSON" 2>"${TEST_JSON_FILE}.err"
-                else
-                    "$FLUTTER" test $PATH_TEST_DIRS --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$PATH_TEST_JSON" 2>"${TEST_JSON_FILE}.err"
-                fi
+                "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test $PATH_TEST_DIRS --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$PATH_TEST_JSON" 2>"${TEST_JSON_FILE}.err"
                 PATH_TEST_EXIT=$?
                 cat "$PATH_TEST_JSON" >> "$TEST_JSON_FILE"
                 rm -f "$PATH_TEST_JSON"
@@ -713,11 +720,7 @@ if should_run "tests"; then
     else
         # Pre-merge or coverage requested: all tests with coverage
         print_info "Running tests with coverage..."
-        if [ -n "$TIMEOUT_CMD" ]; then
-            "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test --coverage --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
-        else
-            "$FLUTTER" test --coverage --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
-        fi
+        "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test --coverage --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
         TEST_EXIT=$?
     fi
 
@@ -1164,17 +1167,10 @@ if should_run "metrics"; then
         # Try JSON reporter first (structured, parseable).
         # DCM writes progress spinner (ANSI codes) to stdout — strip them,
         # then extract the JSON object line (starts with '{' or '[').
-        if [ -n "$TIMEOUT_CMD" ]; then
-            "$TIMEOUT_CMD" "$METRICS_TIMEOUT" "$METRICS_CMD" analyze lib/ --reporter=json 2>/dev/null \
-                | sed $'s/\033\[[0-9;]*[a-zA-Z]//g' \
-                | tr -d '\r' \
-                | grep -E '^\[|^\{' > "$METRICS_JSON_FILE"
-        else
-            "$METRICS_CMD" analyze lib/ --reporter=json 2>/dev/null \
-                | sed $'s/\033\[[0-9;]*[a-zA-Z]//g' \
-                | tr -d '\r' \
-                | grep -E '^\[|^\{' > "$METRICS_JSON_FILE"
-        fi
+        "$TIMEOUT_CMD" "$METRICS_TIMEOUT" "$METRICS_CMD" analyze lib/ --reporter=json 2>/dev/null \
+            | sed $'s/\033\[[0-9;]*[a-zA-Z]//g' \
+            | tr -d '\r' \
+            | grep -E '^\[|^\{' > "$METRICS_JSON_FILE"
         METRICS_JSON_EXIT=${PIPESTATUS[0]}
 
         METRICS_PARSED=""
