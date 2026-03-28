@@ -649,8 +649,10 @@ METRICS_JSON_FILE=""
 
 cleanup() {
     rm -f "$TEST_JSON_FILE" "${TEST_JSON_FILE}.err" "$METRICS_JSON_FILE" 2>/dev/null
+    rm -f "${_FMT_OUT:-}" "${_ANA_OUT:-}" 2>/dev/null
+    rm -rf "${_GREP_DIR:-}" "${_vdir:-}" 2>/dev/null
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT INT TERM HUP
 
 if should_run "tests"; then
     if [ -n "$TEST_DIRS" ]; then
