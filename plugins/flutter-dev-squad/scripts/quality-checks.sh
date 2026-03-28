@@ -1140,12 +1140,12 @@ if should_run "metrics"; then
         # then extract the JSON object line (starts with '{' or '[').
         if [ -n "$TIMEOUT_CMD" ]; then
             $TIMEOUT_CMD $METRICS_TIMEOUT $METRICS_CMD analyze lib/ --reporter=json 2>/dev/null \
-                | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
+                | sed $'s/\033\[[0-9;]*[a-zA-Z]//g' \
                 | tr -d '\r' \
                 | grep -E '^\[|^\{' > "$METRICS_JSON_FILE"
         else
             $METRICS_CMD analyze lib/ --reporter=json 2>/dev/null \
-                | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
+                | sed $'s/\033\[[0-9;]*[a-zA-Z]//g' \
                 | tr -d '\r' \
                 | grep -E '^\[|^\{' > "$METRICS_JSON_FILE"
         fi
