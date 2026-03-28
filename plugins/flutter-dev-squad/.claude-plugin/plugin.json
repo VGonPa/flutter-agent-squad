@@ -1,6 +1,6 @@
 {
   "name": "flutter-dev-squad",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "11 skills + 8 agents for production-grade Flutter development. Covers architecture, UI, state management (Riverpod), testing, performance, security, deployment, and code quality.",
   "author": {
     "name": "Víctor González Pacheco"
