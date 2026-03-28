@@ -1,0 +1,20 @@
+{
+  "name": "flutter-dev-squad",
+  "version": "2.0.0",
+  "description": "11 skills + 8 agents for production-grade Flutter development. Covers architecture, UI, state management (Riverpod), testing, performance, security, deployment, and code quality.",
+  "author": {
+    "name": "VGonPa"
+  },
+  "license": "MIT",
+  "keywords": [
+    "flutter",
+    "dart",
+    "riverpod",
+    "clean-architecture",
+    "testing",
+    "deployment",
+    "code-review",
+    "performance",
+    "security"
+  ]
+}
