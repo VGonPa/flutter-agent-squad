@@ -138,11 +138,11 @@ HELP
 MODE="pre-merge"
 ONLY_CHECKS=""
 SKIP_CHECKS=""
-CHECK_PATHS=""
+CHECK_PATHS=()
 TOTAL_SHARDS=""
 SHARD_INDEX=""
 OUTPUT_FORMAT="text"
-TEST_DIRS=""
+TEST_DIRS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -162,7 +162,7 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: --paths requires a directory list."
                 exit 1
             fi
-            CHECK_PATHS="$2"; shift 2 ;;
+            read -ra CHECK_PATHS <<< "$2"; shift 2 ;;
         --skip)
             if [ -z "${2:-}" ] || [[ "${2:-}" == -* ]]; then
                 echo "Error: --skip requires a comma-separated list of checks."
@@ -215,7 +215,7 @@ while [[ $# -gt 0 ]]; do
                 echo "Error: --test-dirs requires a directory list."
                 exit 1
             fi
-            TEST_DIRS="$2"; shift 2 ;;
+            read -ra TEST_DIRS <<< "$2"; shift 2 ;;
         *)
             echo "Error: unknown argument '$1'"
             echo "Run with --help for usage information."
@@ -223,9 +223,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+VALID_CHECKS="format,analyze,tests,coverage,linecount,secrets,deadcode,noprint,architecture,metrics"
+
 # Validate --only check names
 if [ -n "$ONLY_CHECKS" ]; then
-    VALID_CHECKS="format,analyze,tests,coverage,linecount,secrets,deadcode,noprint,architecture,metrics"
     IFS=',' read -ra _checks <<< "$ONLY_CHECKS"
     for _check in "${_checks[@]}"; do
         if ! echo ",$VALID_CHECKS," | grep -q ",$_check,"; then
@@ -239,7 +240,6 @@ fi
 
 # Validate --skip check names
 if [ -n "$SKIP_CHECKS" ]; then
-    VALID_CHECKS="format,analyze,tests,coverage,linecount,secrets,deadcode,noprint,architecture,metrics"
     IFS=',' read -ra _checks <<< "$SKIP_CHECKS"
     for _check in "${_checks[@]}"; do
         if ! echo ",$VALID_CHECKS," | grep -q ",$_check,"; then
@@ -356,6 +356,10 @@ else
     fi
     if [ -z "$FLUTTER" ] || [ ! -x "$FLUTTER" ]; then
         echo "ERROR: Flutter not found. Install FVM or add Flutter to your PATH."
+        exit 1
+    fi
+    if [ -z "$DART" ] || [ ! -x "$DART" ]; then
+        echo "ERROR: Dart not found. Install FVM or add Dart to your PATH."
         exit 1
     fi
 fi
@@ -532,10 +536,12 @@ fi
 # Launch format in background
 if [ "$RUN_FORMAT" = true ]; then
     {
-        if [ "$MODE" = "pre-commit" ] && [ -n "$CHECK_PATHS" ]; then
-            $DART format --set-exit-if-changed --output=none $CHECK_PATHS
+        if [ "$MODE" = "pre-commit" ] && [ ${#CHECK_PATHS[@]} -gt 0 ]; then
+            "$DART" format --set-exit-if-changed --output=none "${CHECK_PATHS[@]}"
         else
-            $DART format --set-exit-if-changed --output=none lib/ test/
+            _fmt_dirs=(lib/)
+            [ -d test ] && _fmt_dirs+=(test/)
+            "$DART" format --set-exit-if-changed --output=none "${_fmt_dirs[@]}"
         fi
     } > "$_FMT_OUT" 2>&1 &
     _FMT_PID=$!
@@ -545,9 +551,9 @@ fi
 if [ "$NEED_ANALYZE" = true ]; then
     {
         if [ -n "$TIMEOUT_CMD" ]; then
-            $TIMEOUT_CMD $ANALYZE_TIMEOUT $FLUTTER analyze --no-pub
+            "$TIMEOUT_CMD" "$ANALYZE_TIMEOUT" "$FLUTTER" analyze --no-pub
         else
-            $FLUTTER analyze --no-pub
+            "$FLUTTER" analyze --no-pub
         fi
     } > "$_ANA_OUT" 2>&1 &
     _ANA_PID=$!
@@ -639,9 +645,9 @@ if should_run "coverage"; then
 fi
 
 # Build optional shard flags for flutter test
-SHARD_FLAGS=""
+SHARD_FLAGS=()
 if [ -n "$TOTAL_SHARDS" ] && [ -n "$SHARD_INDEX" ]; then
-    SHARD_FLAGS="--total-shards=$TOTAL_SHARDS --shard-index=$SHARD_INDEX"
+    SHARD_FLAGS=(--total-shards="$TOTAL_SHARDS" --shard-index="$SHARD_INDEX")
 fi
 
 TEST_JSON_FILE=$(mktemp /tmp/flutter_test_XXXXXX.jsonl)
@@ -655,17 +661,17 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 if should_run "tests"; then
-    if [ -n "$TEST_DIRS" ]; then
+    if [ ${#TEST_DIRS[@]} -gt 0 ]; then
         # --test-dirs: run tests in specified directories (single invocation to avoid JSON test ID collision)
         COVERAGE_FLAG=""
         if [ "$NEED_COVERAGE_FLAG" = true ]; then
             COVERAGE_FLAG="--coverage"
         fi
-        print_info "Running tests in ${TEST_DIRS}..."
+        print_info "Running tests in ${TEST_DIRS[*]}..."
         if [ -n "$TIMEOUT_CMD" ]; then
-            $TIMEOUT_CMD $TEST_TIMEOUT $FLUTTER test $TEST_DIRS $COVERAGE_FLAG --no-pub --concurrency=8 --dart-define=TEST_MODE=true $SHARD_FLAGS --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
+            "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test "${TEST_DIRS[@]}" $COVERAGE_FLAG --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
         else
-            $FLUTTER test $TEST_DIRS $COVERAGE_FLAG --no-pub --concurrency=8 --dart-define=TEST_MODE=true $SHARD_FLAGS --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
+            "$FLUTTER" test "${TEST_DIRS[@]}" $COVERAGE_FLAG --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
         fi
         TEST_EXIT=$?
         unset COVERAGE_FLAG
@@ -673,17 +679,17 @@ if should_run "tests"; then
         # Pre-commit: unit tests only, no coverage
         print_info "Running unit tests (--tags unit)..."
         if [ -n "$TIMEOUT_CMD" ]; then
-            $TIMEOUT_CMD $TEST_TIMEOUT $FLUTTER test --tags unit --no-pub --concurrency=8 --dart-define=TEST_MODE=true $SHARD_FLAGS --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
+            "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test --tags unit --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
         else
-            $FLUTTER test --tags unit --no-pub --concurrency=8 --dart-define=TEST_MODE=true $SHARD_FLAGS --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
+            "$FLUTTER" test --tags unit --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
         fi
         TEST_EXIT=$?
 
         # If --paths provided, also run tests in those directories
         PATH_TEST_EXIT=0
-        if [ -n "$CHECK_PATHS" ] && [ $TEST_EXIT -eq 0 ]; then
+        if [ ${#CHECK_PATHS[@]} -gt 0 ] && [ $TEST_EXIT -eq 0 ]; then
             PATH_TEST_DIRS=""
-            for p in $CHECK_PATHS; do
+            for p in "${CHECK_PATHS[@]}"; do
                 if [[ "$p" == test/* ]]; then
                     PATH_TEST_DIRS="$PATH_TEST_DIRS $p"
                 fi
@@ -692,9 +698,9 @@ if should_run "tests"; then
                 print_info "Running tests in affected paths ($PATH_TEST_DIRS)..."
                 PATH_TEST_JSON=$(mktemp /tmp/flutter_path_test_XXXXXX.jsonl)
                 if [ -n "$TIMEOUT_CMD" ]; then
-                    $TIMEOUT_CMD $TEST_TIMEOUT $FLUTTER test $PATH_TEST_DIRS --no-pub --concurrency=8 --dart-define=TEST_MODE=true $SHARD_FLAGS --reporter json > "$PATH_TEST_JSON" 2>"${TEST_JSON_FILE}.err"
+                    "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test $PATH_TEST_DIRS --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$PATH_TEST_JSON" 2>"${TEST_JSON_FILE}.err"
                 else
-                    $FLUTTER test $PATH_TEST_DIRS --no-pub --concurrency=8 --dart-define=TEST_MODE=true $SHARD_FLAGS --reporter json > "$PATH_TEST_JSON" 2>"${TEST_JSON_FILE}.err"
+                    "$FLUTTER" test $PATH_TEST_DIRS --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$PATH_TEST_JSON" 2>"${TEST_JSON_FILE}.err"
                 fi
                 PATH_TEST_EXIT=$?
                 cat "$PATH_TEST_JSON" >> "$TEST_JSON_FILE"
@@ -708,9 +714,9 @@ if should_run "tests"; then
         # Pre-merge or coverage requested: all tests with coverage
         print_info "Running tests with coverage..."
         if [ -n "$TIMEOUT_CMD" ]; then
-            $TIMEOUT_CMD $TEST_TIMEOUT $FLUTTER test --coverage --no-pub --concurrency=8 --dart-define=TEST_MODE=true $SHARD_FLAGS --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
+            "$TIMEOUT_CMD" "$TEST_TIMEOUT" "$FLUTTER" test --coverage --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
         else
-            $FLUTTER test --coverage --no-pub --concurrency=8 --dart-define=TEST_MODE=true $SHARD_FLAGS --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
+            "$FLUTTER" test --coverage --no-pub --concurrency=8 --dart-define=TEST_MODE=true "${SHARD_FLAGS[@]}" --reporter json > "$TEST_JSON_FILE" 2>"${TEST_JSON_FILE}.err"
         fi
         TEST_EXIT=$?
     fi
@@ -917,8 +923,8 @@ _ARCH_PID=""
 if should_run "linecount"; then
     (
         _df=$(mktemp)
-        if [ "$MODE" = "pre-commit" ] && [ -n "$CHECK_PATHS" ]; then
-            for p in $CHECK_PATHS; do
+        if [ "$MODE" = "pre-commit" ] && [ ${#CHECK_PATHS[@]} -gt 0 ]; then
+            for p in "${CHECK_PATHS[@]}"; do
                 find "$p" -name "*.dart" -type f ! -name "*.freezed.dart" ! -name "*.g.dart" 2>/dev/null >> "$_df"
             done
         else
@@ -954,8 +960,8 @@ fi
 # ── Launch noprint check in background ──
 if should_run "noprint"; then
     (
-        if [ "$MODE" = "pre-commit" ] && [ -n "$CHECK_PATHS" ]; then
-            grep -rn --include="*.dart" -E '\bprint\(' $CHECK_PATHS 2>/dev/null | grep -v '// allow-print' || true
+        if [ "$MODE" = "pre-commit" ] && [ ${#CHECK_PATHS[@]} -gt 0 ]; then
+            grep -rn --include="*.dart" -E '\bprint\(' "${CHECK_PATHS[@]}" 2>/dev/null | grep -v '// allow-print' || true
         else
             grep -rn --include="*.dart" -E '\bprint\(' lib/ 2>/dev/null | grep -v '// allow-print' || true
         fi
@@ -1159,12 +1165,12 @@ if should_run "metrics"; then
         # DCM writes progress spinner (ANSI codes) to stdout — strip them,
         # then extract the JSON object line (starts with '{' or '[').
         if [ -n "$TIMEOUT_CMD" ]; then
-            $TIMEOUT_CMD $METRICS_TIMEOUT $METRICS_CMD analyze lib/ --reporter=json 2>/dev/null \
+            "$TIMEOUT_CMD" "$METRICS_TIMEOUT" "$METRICS_CMD" analyze lib/ --reporter=json 2>/dev/null \
                 | sed $'s/\033\[[0-9;]*[a-zA-Z]//g' \
                 | tr -d '\r' \
                 | grep -E '^\[|^\{' > "$METRICS_JSON_FILE"
         else
-            $METRICS_CMD analyze lib/ --reporter=json 2>/dev/null \
+            "$METRICS_CMD" analyze lib/ --reporter=json 2>/dev/null \
                 | sed $'s/\033\[[0-9;]*[a-zA-Z]//g' \
                 | tr -d '\r' \
                 | grep -E '^\[|^\{' > "$METRICS_JSON_FILE"
@@ -1320,7 +1326,7 @@ print('PARSE_OK=1')
                 CC_STATUS="fail"
                 mark_failed "Cyclomatic Complexity"
             else
-                print_success "Cyclomatic Complexity: OK (max: ${CC_MAX_VAL}, limite: ${THRESHOLD_CC})"
+                print_success "Cyclomatic Complexity: OK (max: ${CC_MAX_VAL}, limit: ${THRESHOLD_CC})"
                 CC_STATUS="pass"
             fi
 
@@ -1333,7 +1339,7 @@ print('PARSE_OK=1')
                 NOP_STATUS="fail"
                 mark_failed "Number of Parameters"
             else
-                print_success "Number of Parameters: OK (max: ${NOP_MAX_VAL}, limite: ${THRESHOLD_NOP})"
+                print_success "Number of Parameters: OK (max: ${NOP_MAX_VAL}, limit: ${THRESHOLD_NOP})"
                 NOP_STATUS="pass"
             fi
 
@@ -1346,7 +1352,7 @@ print('PARSE_OK=1')
                 NEST_STATUS="fail"
                 mark_failed "Maximum Nesting Level"
             else
-                print_success "Maximum Nesting Level: OK (max: ${NEST_MAX_VAL}, limite: ${THRESHOLD_NESTING})"
+                print_success "Maximum Nesting Level: OK (max: ${NEST_MAX_VAL}, limit: ${THRESHOLD_NESTING})"
                 NEST_STATUS="pass"
             fi
 
@@ -1596,7 +1602,7 @@ print_summary() {
         skip_info=" | ${skip_count} skipped"
     fi
     local flutter_ver
-    flutter_ver=$($FLUTTER --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    flutter_ver=$("$FLUTTER" --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     printf "  ${DIM}Duration: %s | Flutter: %s%s${NC}\n" "$(format_duration $SCRIPT_DURATION)" "$flutter_ver" "$skip_info"
     printf "${BOLD}-----------------------------------------------------------------------${NC}\n"
     printf "\n"
@@ -1619,7 +1625,7 @@ print_json_summary() {
     # Write violation data to temp files for python to read safely
     { echo "${FORMAT_OUTPUT:-}" | grep "Changed" || true; } > "$_vdir/format" 2>/dev/null
     { echo "${ANALYZE_CLEAN:-}" | grep -E " error | warning " || true; } > "$_vdir/analyze" 2>/dev/null
-    { printf '%b\n' "${LINECOUNT_OVER:-}" || true; } > "$_vdir/linecount" 2>/dev/null
+    { printf '%s\n' "${LINECOUNT_OVER:-}" || true; } > "$_vdir/linecount" 2>/dev/null
     echo "${PRINT_OUTPUT:-}" > "$_vdir/noprint" 2>/dev/null
     echo "${ARCH_CORE_OUTPUT:-}" > "$_vdir/arch_core" 2>/dev/null
     echo "${ARCH_SHARED_OUTPUT:-}" > "$_vdir/arch_shared" 2>/dev/null
